@@ -10,13 +10,26 @@
     "lint": "eslint src"
   },
   "dependencies": {
+    "@repo/db": "*",
     "@repo/typescript-config": "*",
-    "@repo/db": "*"
+    "@types/node": "^26.0.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "helmet": "^8.2.0",
+    "ioredis": "^5.11.1",
+    "jsonwebtoken": "^9.0.3",
+    "kafkajs": "^2.2.4",
+    "pino": "^10.3.1",
+    "undici": "^8.5.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "^1.3.14",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "pino-pretty": "^13.1.3"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^6.0.3"
   }
 }

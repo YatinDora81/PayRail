@@ -1,25 +1,22 @@
 {
-  "extends" : "@repo/typescript-config/base.json",
-    "compilerOptions": {
+  "extends": "@repo/typescript-config/base.json",
+  "compilerOptions": {
     "target": "ESNext",
     "lib": ["ESNext"],
-
     "module": "Preserve",
     "moduleResolution": "bundler",
     "moduleDetection": "force",
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
-
     "esModuleInterop": true,
     "resolveJsonModule": true,
-
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true,
-
+    "types": ["bun"],
     "skipLibCheck": true
   }
 }
