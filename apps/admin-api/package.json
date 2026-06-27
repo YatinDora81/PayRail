@@ -10,6 +10,9 @@
     "lint": "eslint src"
   },
   "dependencies": {
+    "@opentelemetry/auto-instrumentations-node": "^0.77.0",
+    "@opentelemetry/exporter-trace-otlp-grpc": "^0.219.0",
+    "@opentelemetry/sdk-node": "^0.219.0",
     "@repo/db": "*",
     "@repo/typescript-config": "*",
     "@types/node": "^26.0.0",
