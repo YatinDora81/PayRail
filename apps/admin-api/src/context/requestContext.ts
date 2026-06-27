@@ -11,7 +11,7 @@ export interface RequestContext {
   traceId: string;
   ip?: string;
   userAgent?: string;
-  actor: Actor;
+  actor?: Actor;
   logger: Logger;
 }
 
@@ -32,7 +32,7 @@ export function requireContext(): RequestContext {
   return ctx;
 }
 
-export function setActor(actor : Actor){
-    const ctx = storage.getStore()
-    if(ctx) ctx.actor = actor
+export function setActor(actor: Actor) {
+  const ctx = storage.getStore();
+  if (ctx) ctx.actor = actor;
 }
