@@ -5,8 +5,6 @@ import { logger } from "../lib/logger";
 export const redis = new Redis(env.REDIS_URL, {
   maxRetriesPerRequest: 2,
   enableReadyCheck: true,
-  // A Redis blip must not take admin-api down: cache/lock callers treat any
-  // rejected command as a miss and fall through to Postgres (see lib/cache.ts).
   retryStrategy: (times) => Math.min(times * 200, 2_000),
 });
 
