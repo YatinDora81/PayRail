@@ -161,6 +161,14 @@ enum DeadLetterSource {
   RECONCILE
 }
 
+/// Claim-first idempotency (hardening §4): a winner claims IN_PROGRESS, finishes
+/// to DONE (replayable) or FAILED; a concurrent retry sees IN_PROGRESS -> 409.
+enum IdempotencyStatus {
+  IN_PROGRESS
+  DONE
+  FAILED
+}
+
 /// INSTANT_DISCOUNT reduces the charge now; CASHBACK doesn't (bank credits later).
 enum BankOfferType {
   INSTANT_DISCOUNT
@@ -783,6 +791,7 @@ model IdempotencyRecord {
   requestHash    String?
   responseStatus Int?
   responseBody   Json? //                         replayed verbatim
+  status         IdempotencyStatus @default(IN_PROGRESS) // claim-first lifecycle
   expiresAt      DateTime
 
   createdAt DateTime @default(now())
