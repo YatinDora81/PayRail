@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package payrail.gateway.v1;
+
+option go_package = "github.com/payrail/go/internal/gatewaypb;gatewaypb";
+
+// make proto cmd to run
+
+enum Gateway {
+  GATEWAY_UNSPECIFIED = 0;
+  GATEWAY_RAZORPAY = 1;
+  GATEWAY_STRIPE = 2;
+  GATEWAY_CASHFREE = 3;
+  GATEWAY_PAYPAL = 4;
+}
+
+enum Currency {
+  CURRENCY_UNSPECIFIED = 0;
+  CURRENCY_INR = 1;
+  CURRENCY_USD = 2;
+  CURRENCY_EUR = 3;
+  CURRENCY_GBP = 4;
+  CURRENCY_AED = 5;
+  CURRENCY_SGD = 6;
+}
+
+enum PaymentStatus {
+  PAYMENT_STATUS_UNSPECIFIED = 0;
+  PAYMENT_STATUS_PENDING = 1;
+  PAYMENT_STATUS_CAPTURED = 2;
+  PAYMENT_STATUS_FAILED = 3;
+  PAYMENT_STATUS_EXPIRED = 4;
+}
+
+enum RefundStatus {
+  REFUND_STATUS_UNSPECIFIED = 0;
+  REFUND_STATUS_PENDING = 1;
+  REFUND_STATUS_PROCESSED = 2;
+  REFUND_STATUS_FAILED = 3;
+}
+
+service GatewayService {
+    rpc CreateOrder (CreateOrderRequest) returns (CreateOrderResponse);
+    rpc VerifyWebhook (VerifyWebhookRequest) returns (VerifyWebhookResponse);
+    rpc FetchPayment(FetchPaymentRequest) returns (FetchPaymentResponse);
+    rpc FetchRefund(FetchRefundRequest) returns (FetchRefundResponse);
+}
+
+message CreateOrderRequest {
+    Gateway gateway = 1;
+    string order_id = 2;
+    int64 amount_minor = 3;
+    Currency currency = 4;
+}
+
+message CreateOrderResponse {
+    string gateway_order_id = 1;
+    map<string , string> client_params = 2;
+}
+
+message VerifyWebhookRequest{
+    Gateway gateway = 1;
+    bytes body = 2;
+    map<string, string> headers = 3;
+}
+
+message VerifyWebhookResponse{
+    bool verified = 1;
+}
+
+message FetchPaymentRequest {
+    Gateway gateway = 1;
+    string gateway_order_id = 2;
+}
+
+message FetchPaymentResponse {
+    PaymentStatus status = 1;
+    string gateway_payment_id = 2;
+    int64 amount_minor = 3;  
+    Currency currency = 4;
+}
+
+message FetchRefundRequest {
+    Gateway gateway = 1;
+    string gateway_refund_id = 2;
+    string idempotency_key = 3;
+}
+
+message FetchRefundResponse {
+  RefundStatus status = 1;
+  string gateway_refund_id = 2;
+  int64 amount_minor = 3;
+}

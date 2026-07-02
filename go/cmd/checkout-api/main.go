@@ -7,6 +7,7 @@ import (
 
 	"github.com/payrail/go/internal/budget"
 	"github.com/payrail/go/internal/config"
+	"github.com/payrail/go/internal/gatewayclient"
 	"github.com/payrail/go/internal/store"
 	"github.com/payrail/go/internal/telemetry"
 )
@@ -46,14 +47,19 @@ func run(logger *slog.Logger) error {
 
 	defer db.Close()
 
-	bg , err := budget.New(ctx , cfg.RedisURL)
+	bg, err := budget.New(ctx, cfg.RedisURL)
 	if err != nil {
 		return err
 	}
 
 	defer bg.Close()
 
-	// gateway client init
+	gw, err := gatewayclient.NewClient(cfg.GatewayTarget, cfg.GatewayTLS, logger)
+	if err != nil {
+		return err
+	}
+
+	defer gw.Close()
 
 	
 
