@@ -2,6 +2,7 @@ package budget
 
 import (
 	"context"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -32,4 +33,18 @@ func (g *Gate) Close() error {
 
 func (g *Gate) Ping(ctx context.Context) error {
 	return g.rdb.Ping(ctx).Err()
+}
+
+var rateScript = redis.NewScript(`
+	local n = redis.call('INCR' , KEYS[1])
+	if n==1  then redis.call('PEXPIRE' , KEYS[1] , ARGV[1] ) end
+	return n
+`)
+
+func (g *Gate) AllowRate(ctx context.Context, key string, limit int, window time.Duration) bool {
+	n, err := rateScript.Run(ctx, g.rdb, []string{"rl:" + key}, window.Milliseconds()).Int64()
+	if err != nil {
+		return true
+	}
+	return n <= int64(limit)
 }
