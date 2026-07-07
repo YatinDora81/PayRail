@@ -27,7 +27,7 @@ func main() {
 	slog.SetDefault(logger)
 
 	if err := run(logger); err != nil {
-		logger.Error("startup failed", "err" ,err)
+		logger.Error("startup failed", "err", err)
 		os.Exit(1)
 	}
 

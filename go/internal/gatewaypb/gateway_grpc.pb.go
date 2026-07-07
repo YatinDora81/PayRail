@@ -19,10 +19,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	GatewayService_CreateOrder_FullMethodName   = "/payrail.gateway.v1.GatewayService/CreateOrder"
-	GatewayService_VerifyWebhook_FullMethodName = "/payrail.gateway.v1.GatewayService/VerifyWebhook"
-	GatewayService_FetchPayment_FullMethodName  = "/payrail.gateway.v1.GatewayService/FetchPayment"
-	GatewayService_FetchRefund_FullMethodName   = "/payrail.gateway.v1.GatewayService/FetchRefund"
+	GatewayService_CreateOrder_FullMethodName          = "/payrail.gateway.v1.GatewayService/CreateOrder"
+	GatewayService_VerifyWebhook_FullMethodName        = "/payrail.gateway.v1.GatewayService/VerifyWebhook"
+	GatewayService_FetchPayment_FullMethodName         = "/payrail.gateway.v1.GatewayService/FetchPayment"
+	GatewayService_FetchRefund_FullMethodName          = "/payrail.gateway.v1.GatewayService/FetchRefund"
+	GatewayService_CapturePayment_FullMethodName       = "/payrail.gateway.v1.GatewayService/CapturePayment"
+	GatewayService_CreateRefund_FullMethodName         = "/payrail.gateway.v1.GatewayService/CreateRefund"
+	GatewayService_FindOrderByReference_FullMethodName = "/payrail.gateway.v1.GatewayService/FindOrderByReference"
 )
 
 // GatewayServiceClient is the client API for GatewayService service.
@@ -33,6 +36,9 @@ type GatewayServiceClient interface {
 	VerifyWebhook(ctx context.Context, in *VerifyWebhookRequest, opts ...grpc.CallOption) (*VerifyWebhookResponse, error)
 	FetchPayment(ctx context.Context, in *FetchPaymentRequest, opts ...grpc.CallOption) (*FetchPaymentResponse, error)
 	FetchRefund(ctx context.Context, in *FetchRefundRequest, opts ...grpc.CallOption) (*FetchRefundResponse, error)
+	CapturePayment(ctx context.Context, in *CaptureRequest, opts ...grpc.CallOption) (*CaptureResponse, error)
+	CreateRefund(ctx context.Context, in *CreateRefundRequest, opts ...grpc.CallOption) (*CreateRefundResponse, error)
+	FindOrderByReference(ctx context.Context, in *FindOrderByReferenceRequest, opts ...grpc.CallOption) (*FindOrderByReferenceResponse, error)
 }
 
 type gatewayServiceClient struct {
@@ -83,6 +89,36 @@ func (c *gatewayServiceClient) FetchRefund(ctx context.Context, in *FetchRefundR
 	return out, nil
 }
 
+func (c *gatewayServiceClient) CapturePayment(ctx context.Context, in *CaptureRequest, opts ...grpc.CallOption) (*CaptureResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CaptureResponse)
+	err := c.cc.Invoke(ctx, GatewayService_CapturePayment_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gatewayServiceClient) CreateRefund(ctx context.Context, in *CreateRefundRequest, opts ...grpc.CallOption) (*CreateRefundResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateRefundResponse)
+	err := c.cc.Invoke(ctx, GatewayService_CreateRefund_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gatewayServiceClient) FindOrderByReference(ctx context.Context, in *FindOrderByReferenceRequest, opts ...grpc.CallOption) (*FindOrderByReferenceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FindOrderByReferenceResponse)
+	err := c.cc.Invoke(ctx, GatewayService_FindOrderByReference_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // GatewayServiceServer is the server API for GatewayService service.
 // All implementations must embed UnimplementedGatewayServiceServer
 // for forward compatibility.
@@ -91,6 +127,9 @@ type GatewayServiceServer interface {
 	VerifyWebhook(context.Context, *VerifyWebhookRequest) (*VerifyWebhookResponse, error)
 	FetchPayment(context.Context, *FetchPaymentRequest) (*FetchPaymentResponse, error)
 	FetchRefund(context.Context, *FetchRefundRequest) (*FetchRefundResponse, error)
+	CapturePayment(context.Context, *CaptureRequest) (*CaptureResponse, error)
+	CreateRefund(context.Context, *CreateRefundRequest) (*CreateRefundResponse, error)
+	FindOrderByReference(context.Context, *FindOrderByReferenceRequest) (*FindOrderByReferenceResponse, error)
 	mustEmbedUnimplementedGatewayServiceServer()
 }
 
@@ -112,6 +151,15 @@ func (UnimplementedGatewayServiceServer) FetchPayment(context.Context, *FetchPay
 }
 func (UnimplementedGatewayServiceServer) FetchRefund(context.Context, *FetchRefundRequest) (*FetchRefundResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method FetchRefund not implemented")
+}
+func (UnimplementedGatewayServiceServer) CapturePayment(context.Context, *CaptureRequest) (*CaptureResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CapturePayment not implemented")
+}
+func (UnimplementedGatewayServiceServer) CreateRefund(context.Context, *CreateRefundRequest) (*CreateRefundResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateRefund not implemented")
+}
+func (UnimplementedGatewayServiceServer) FindOrderByReference(context.Context, *FindOrderByReferenceRequest) (*FindOrderByReferenceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method FindOrderByReference not implemented")
 }
 func (UnimplementedGatewayServiceServer) mustEmbedUnimplementedGatewayServiceServer() {}
 func (UnimplementedGatewayServiceServer) testEmbeddedByValue()                        {}
@@ -206,6 +254,60 @@ func _GatewayService_FetchRefund_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _GatewayService_CapturePayment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CaptureRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GatewayServiceServer).CapturePayment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GatewayService_CapturePayment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GatewayServiceServer).CapturePayment(ctx, req.(*CaptureRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GatewayService_CreateRefund_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateRefundRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GatewayServiceServer).CreateRefund(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GatewayService_CreateRefund_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GatewayServiceServer).CreateRefund(ctx, req.(*CreateRefundRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GatewayService_FindOrderByReference_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FindOrderByReferenceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GatewayServiceServer).FindOrderByReference(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GatewayService_FindOrderByReference_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GatewayServiceServer).FindOrderByReference(ctx, req.(*FindOrderByReferenceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // GatewayService_ServiceDesc is the grpc.ServiceDesc for GatewayService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -228,6 +330,18 @@ var GatewayService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "FetchRefund",
 			Handler:    _GatewayService_FetchRefund_Handler,
+		},
+		{
+			MethodName: "CapturePayment",
+			Handler:    _GatewayService_CapturePayment_Handler,
+		},
+		{
+			MethodName: "CreateRefund",
+			Handler:    _GatewayService_CreateRefund_Handler,
+		},
+		{
+			MethodName: "FindOrderByReference",
+			Handler:    _GatewayService_FindOrderByReference_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

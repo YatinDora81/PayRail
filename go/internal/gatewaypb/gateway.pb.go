@@ -708,6 +708,390 @@ func (x *FetchRefundResponse) GetAmountMinor() int64 {
 	return 0
 }
 
+type CaptureRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Gateway          Gateway                `protobuf:"varint,1,opt,name=gateway,proto3,enum=payrail.gateway.v1.Gateway" json:"gateway,omitempty"`
+	GatewayPaymentId string                 `protobuf:"bytes,2,opt,name=gateway_payment_id,json=gatewayPaymentId,proto3" json:"gateway_payment_id,omitempty"`
+	AmountMinor      int64                  `protobuf:"varint,3,opt,name=amount_minor,json=amountMinor,proto3" json:"amount_minor,omitempty"`
+	Currency         Currency               `protobuf:"varint,4,opt,name=currency,proto3,enum=payrail.gateway.v1.Currency" json:"currency,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *CaptureRequest) Reset() {
+	*x = CaptureRequest{}
+	mi := &file_gateway_v1_gateway_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CaptureRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CaptureRequest) ProtoMessage() {}
+
+func (x *CaptureRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gateway_v1_gateway_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CaptureRequest.ProtoReflect.Descriptor instead.
+func (*CaptureRequest) Descriptor() ([]byte, []int) {
+	return file_gateway_v1_gateway_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *CaptureRequest) GetGateway() Gateway {
+	if x != nil {
+		return x.Gateway
+	}
+	return Gateway_GATEWAY_UNSPECIFIED
+}
+
+func (x *CaptureRequest) GetGatewayPaymentId() string {
+	if x != nil {
+		return x.GatewayPaymentId
+	}
+	return ""
+}
+
+func (x *CaptureRequest) GetAmountMinor() int64 {
+	if x != nil {
+		return x.AmountMinor
+	}
+	return 0
+}
+
+func (x *CaptureRequest) GetCurrency() Currency {
+	if x != nil {
+		return x.Currency
+	}
+	return Currency_CURRENCY_UNSPECIFIED
+}
+
+type CaptureResponse struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Status           PaymentStatus          `protobuf:"varint,1,opt,name=status,proto3,enum=payrail.gateway.v1.PaymentStatus" json:"status,omitempty"`
+	GatewayPaymentId string                 `protobuf:"bytes,2,opt,name=gateway_payment_id,json=gatewayPaymentId,proto3" json:"gateway_payment_id,omitempty"`
+	AmountMinor      int64                  `protobuf:"varint,3,opt,name=amount_minor,json=amountMinor,proto3" json:"amount_minor,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *CaptureResponse) Reset() {
+	*x = CaptureResponse{}
+	mi := &file_gateway_v1_gateway_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CaptureResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CaptureResponse) ProtoMessage() {}
+
+func (x *CaptureResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gateway_v1_gateway_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CaptureResponse.ProtoReflect.Descriptor instead.
+func (*CaptureResponse) Descriptor() ([]byte, []int) {
+	return file_gateway_v1_gateway_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *CaptureResponse) GetStatus() PaymentStatus {
+	if x != nil {
+		return x.Status
+	}
+	return PaymentStatus_PAYMENT_STATUS_UNSPECIFIED
+}
+
+func (x *CaptureResponse) GetGatewayPaymentId() string {
+	if x != nil {
+		return x.GatewayPaymentId
+	}
+	return ""
+}
+
+func (x *CaptureResponse) GetAmountMinor() int64 {
+	if x != nil {
+		return x.AmountMinor
+	}
+	return 0
+}
+
+type CreateRefundRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Gateway          Gateway                `protobuf:"varint,1,opt,name=gateway,proto3,enum=payrail.gateway.v1.Gateway" json:"gateway,omitempty"`
+	GatewayPaymentId string                 `protobuf:"bytes,2,opt,name=gateway_payment_id,json=gatewayPaymentId,proto3" json:"gateway_payment_id,omitempty"`
+	AmountMinor      int64                  `protobuf:"varint,3,opt,name=amount_minor,json=amountMinor,proto3" json:"amount_minor,omitempty"`
+	Currency         Currency               `protobuf:"varint,4,opt,name=currency,proto3,enum=payrail.gateway.v1.Currency" json:"currency,omitempty"`
+	IdempotencyKey   string                 `protobuf:"bytes,5,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *CreateRefundRequest) Reset() {
+	*x = CreateRefundRequest{}
+	mi := &file_gateway_v1_gateway_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateRefundRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateRefundRequest) ProtoMessage() {}
+
+func (x *CreateRefundRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gateway_v1_gateway_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateRefundRequest.ProtoReflect.Descriptor instead.
+func (*CreateRefundRequest) Descriptor() ([]byte, []int) {
+	return file_gateway_v1_gateway_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *CreateRefundRequest) GetGateway() Gateway {
+	if x != nil {
+		return x.Gateway
+	}
+	return Gateway_GATEWAY_UNSPECIFIED
+}
+
+func (x *CreateRefundRequest) GetGatewayPaymentId() string {
+	if x != nil {
+		return x.GatewayPaymentId
+	}
+	return ""
+}
+
+func (x *CreateRefundRequest) GetAmountMinor() int64 {
+	if x != nil {
+		return x.AmountMinor
+	}
+	return 0
+}
+
+func (x *CreateRefundRequest) GetCurrency() Currency {
+	if x != nil {
+		return x.Currency
+	}
+	return Currency_CURRENCY_UNSPECIFIED
+}
+
+func (x *CreateRefundRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+type CreateRefundResponse struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Status          RefundStatus           `protobuf:"varint,1,opt,name=status,proto3,enum=payrail.gateway.v1.RefundStatus" json:"status,omitempty"`
+	GatewayRefundId string                 `protobuf:"bytes,2,opt,name=gateway_refund_id,json=gatewayRefundId,proto3" json:"gateway_refund_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *CreateRefundResponse) Reset() {
+	*x = CreateRefundResponse{}
+	mi := &file_gateway_v1_gateway_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateRefundResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateRefundResponse) ProtoMessage() {}
+
+func (x *CreateRefundResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gateway_v1_gateway_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateRefundResponse.ProtoReflect.Descriptor instead.
+func (*CreateRefundResponse) Descriptor() ([]byte, []int) {
+	return file_gateway_v1_gateway_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *CreateRefundResponse) GetStatus() RefundStatus {
+	if x != nil {
+		return x.Status
+	}
+	return RefundStatus_REFUND_STATUS_UNSPECIFIED
+}
+
+func (x *CreateRefundResponse) GetGatewayRefundId() string {
+	if x != nil {
+		return x.GatewayRefundId
+	}
+	return ""
+}
+
+type FindOrderByReferenceRequest struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Gateway           Gateway                `protobuf:"varint,1,opt,name=gateway,proto3,enum=payrail.gateway.v1.Gateway" json:"gateway,omitempty"`
+	MerchantReference string                 `protobuf:"bytes,2,opt,name=merchant_reference,json=merchantReference,proto3" json:"merchant_reference,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *FindOrderByReferenceRequest) Reset() {
+	*x = FindOrderByReferenceRequest{}
+	mi := &file_gateway_v1_gateway_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FindOrderByReferenceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FindOrderByReferenceRequest) ProtoMessage() {}
+
+func (x *FindOrderByReferenceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gateway_v1_gateway_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FindOrderByReferenceRequest.ProtoReflect.Descriptor instead.
+func (*FindOrderByReferenceRequest) Descriptor() ([]byte, []int) {
+	return file_gateway_v1_gateway_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *FindOrderByReferenceRequest) GetGateway() Gateway {
+	if x != nil {
+		return x.Gateway
+	}
+	return Gateway_GATEWAY_UNSPECIFIED
+}
+
+func (x *FindOrderByReferenceRequest) GetMerchantReference() string {
+	if x != nil {
+		return x.MerchantReference
+	}
+	return ""
+}
+
+type FindOrderByReferenceResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Found          bool                   `protobuf:"varint,1,opt,name=found,proto3" json:"found,omitempty"`
+	GatewayOrderId string                 `protobuf:"bytes,2,opt,name=gateway_order_id,json=gatewayOrderId,proto3" json:"gateway_order_id,omitempty"`
+	Status         PaymentStatus          `protobuf:"varint,3,opt,name=status,proto3,enum=payrail.gateway.v1.PaymentStatus" json:"status,omitempty"`
+	AmountMinor    int64                  `protobuf:"varint,4,opt,name=amount_minor,json=amountMinor,proto3" json:"amount_minor,omitempty"`
+	Currency       Currency               `protobuf:"varint,5,opt,name=currency,proto3,enum=payrail.gateway.v1.Currency" json:"currency,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *FindOrderByReferenceResponse) Reset() {
+	*x = FindOrderByReferenceResponse{}
+	mi := &file_gateway_v1_gateway_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FindOrderByReferenceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FindOrderByReferenceResponse) ProtoMessage() {}
+
+func (x *FindOrderByReferenceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gateway_v1_gateway_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FindOrderByReferenceResponse.ProtoReflect.Descriptor instead.
+func (*FindOrderByReferenceResponse) Descriptor() ([]byte, []int) {
+	return file_gateway_v1_gateway_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *FindOrderByReferenceResponse) GetFound() bool {
+	if x != nil {
+		return x.Found
+	}
+	return false
+}
+
+func (x *FindOrderByReferenceResponse) GetGatewayOrderId() string {
+	if x != nil {
+		return x.GatewayOrderId
+	}
+	return ""
+}
+
+func (x *FindOrderByReferenceResponse) GetStatus() PaymentStatus {
+	if x != nil {
+		return x.Status
+	}
+	return PaymentStatus_PAYMENT_STATUS_UNSPECIFIED
+}
+
+func (x *FindOrderByReferenceResponse) GetAmountMinor() int64 {
+	if x != nil {
+		return x.AmountMinor
+	}
+	return 0
+}
+
+func (x *FindOrderByReferenceResponse) GetCurrency() Currency {
+	if x != nil {
+		return x.Currency
+	}
+	return Currency_CURRENCY_UNSPECIFIED
+}
+
 var File_gateway_v1_gateway_proto protoreflect.FileDescriptor
 
 const file_gateway_v1_gateway_proto_rawDesc = "" +
@@ -748,7 +1132,34 @@ const file_gateway_v1_gateway_proto_rawDesc = "" +
 	"\x13FetchRefundResponse\x128\n" +
 	"\x06status\x18\x01 \x01(\x0e2 .payrail.gateway.v1.RefundStatusR\x06status\x12*\n" +
 	"\x11gateway_refund_id\x18\x02 \x01(\tR\x0fgatewayRefundId\x12!\n" +
-	"\famount_minor\x18\x03 \x01(\x03R\vamountMinor*v\n" +
+	"\famount_minor\x18\x03 \x01(\x03R\vamountMinor\"\xd2\x01\n" +
+	"\x0eCaptureRequest\x125\n" +
+	"\agateway\x18\x01 \x01(\x0e2\x1b.payrail.gateway.v1.GatewayR\agateway\x12,\n" +
+	"\x12gateway_payment_id\x18\x02 \x01(\tR\x10gatewayPaymentId\x12!\n" +
+	"\famount_minor\x18\x03 \x01(\x03R\vamountMinor\x128\n" +
+	"\bcurrency\x18\x04 \x01(\x0e2\x1c.payrail.gateway.v1.CurrencyR\bcurrency\"\x9d\x01\n" +
+	"\x0fCaptureResponse\x129\n" +
+	"\x06status\x18\x01 \x01(\x0e2!.payrail.gateway.v1.PaymentStatusR\x06status\x12,\n" +
+	"\x12gateway_payment_id\x18\x02 \x01(\tR\x10gatewayPaymentId\x12!\n" +
+	"\famount_minor\x18\x03 \x01(\x03R\vamountMinor\"\x80\x02\n" +
+	"\x13CreateRefundRequest\x125\n" +
+	"\agateway\x18\x01 \x01(\x0e2\x1b.payrail.gateway.v1.GatewayR\agateway\x12,\n" +
+	"\x12gateway_payment_id\x18\x02 \x01(\tR\x10gatewayPaymentId\x12!\n" +
+	"\famount_minor\x18\x03 \x01(\x03R\vamountMinor\x128\n" +
+	"\bcurrency\x18\x04 \x01(\x0e2\x1c.payrail.gateway.v1.CurrencyR\bcurrency\x12'\n" +
+	"\x0fidempotency_key\x18\x05 \x01(\tR\x0eidempotencyKey\"|\n" +
+	"\x14CreateRefundResponse\x128\n" +
+	"\x06status\x18\x01 \x01(\x0e2 .payrail.gateway.v1.RefundStatusR\x06status\x12*\n" +
+	"\x11gateway_refund_id\x18\x02 \x01(\tR\x0fgatewayRefundId\"\x83\x01\n" +
+	"\x1bFindOrderByReferenceRequest\x125\n" +
+	"\agateway\x18\x01 \x01(\x0e2\x1b.payrail.gateway.v1.GatewayR\agateway\x12-\n" +
+	"\x12merchant_reference\x18\x02 \x01(\tR\x11merchantReference\"\xf6\x01\n" +
+	"\x1cFindOrderByReferenceResponse\x12\x14\n" +
+	"\x05found\x18\x01 \x01(\bR\x05found\x12(\n" +
+	"\x10gateway_order_id\x18\x02 \x01(\tR\x0egatewayOrderId\x129\n" +
+	"\x06status\x18\x03 \x01(\x0e2!.payrail.gateway.v1.PaymentStatusR\x06status\x12!\n" +
+	"\famount_minor\x18\x04 \x01(\x03R\vamountMinor\x128\n" +
+	"\bcurrency\x18\x05 \x01(\x0e2\x1c.payrail.gateway.v1.CurrencyR\bcurrency*v\n" +
 	"\aGateway\x12\x17\n" +
 	"\x13GATEWAY_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10GATEWAY_RAZORPAY\x10\x01\x12\x12\n" +
@@ -773,12 +1184,15 @@ const file_gateway_v1_gateway_proto_rawDesc = "" +
 	"\x19REFUND_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15REFUND_STATUS_PENDING\x10\x01\x12\x1b\n" +
 	"\x17REFUND_STATUS_PROCESSED\x10\x02\x12\x18\n" +
-	"\x14REFUND_STATUS_FAILED\x10\x032\x99\x03\n" +
+	"\x14REFUND_STATUS_FAILED\x10\x032\xd2\x05\n" +
 	"\x0eGatewayService\x12^\n" +
 	"\vCreateOrder\x12&.payrail.gateway.v1.CreateOrderRequest\x1a'.payrail.gateway.v1.CreateOrderResponse\x12d\n" +
 	"\rVerifyWebhook\x12(.payrail.gateway.v1.VerifyWebhookRequest\x1a).payrail.gateway.v1.VerifyWebhookResponse\x12a\n" +
 	"\fFetchPayment\x12'.payrail.gateway.v1.FetchPaymentRequest\x1a(.payrail.gateway.v1.FetchPaymentResponse\x12^\n" +
-	"\vFetchRefund\x12&.payrail.gateway.v1.FetchRefundRequest\x1a'.payrail.gateway.v1.FetchRefundResponseB4Z2github.com/payrail/go/internal/gatewaypb;gatewaypbb\x06proto3"
+	"\vFetchRefund\x12&.payrail.gateway.v1.FetchRefundRequest\x1a'.payrail.gateway.v1.FetchRefundResponse\x12Y\n" +
+	"\x0eCapturePayment\x12\".payrail.gateway.v1.CaptureRequest\x1a#.payrail.gateway.v1.CaptureResponse\x12a\n" +
+	"\fCreateRefund\x12'.payrail.gateway.v1.CreateRefundRequest\x1a(.payrail.gateway.v1.CreateRefundResponse\x12y\n" +
+	"\x14FindOrderByReference\x12/.payrail.gateway.v1.FindOrderByReferenceRequest\x1a0.payrail.gateway.v1.FindOrderByReferenceResponseB4Z2github.com/payrail/go/internal/gatewaypb;gatewaypbb\x06proto3"
 
 var (
 	file_gateway_v1_gateway_proto_rawDescOnce sync.Once
@@ -793,47 +1207,68 @@ func file_gateway_v1_gateway_proto_rawDescGZIP() []byte {
 }
 
 var file_gateway_v1_gateway_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_gateway_v1_gateway_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_gateway_v1_gateway_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_gateway_v1_gateway_proto_goTypes = []any{
-	(Gateway)(0),                  // 0: payrail.gateway.v1.Gateway
-	(Currency)(0),                 // 1: payrail.gateway.v1.Currency
-	(PaymentStatus)(0),            // 2: payrail.gateway.v1.PaymentStatus
-	(RefundStatus)(0),             // 3: payrail.gateway.v1.RefundStatus
-	(*CreateOrderRequest)(nil),    // 4: payrail.gateway.v1.CreateOrderRequest
-	(*CreateOrderResponse)(nil),   // 5: payrail.gateway.v1.CreateOrderResponse
-	(*VerifyWebhookRequest)(nil),  // 6: payrail.gateway.v1.VerifyWebhookRequest
-	(*VerifyWebhookResponse)(nil), // 7: payrail.gateway.v1.VerifyWebhookResponse
-	(*FetchPaymentRequest)(nil),   // 8: payrail.gateway.v1.FetchPaymentRequest
-	(*FetchPaymentResponse)(nil),  // 9: payrail.gateway.v1.FetchPaymentResponse
-	(*FetchRefundRequest)(nil),    // 10: payrail.gateway.v1.FetchRefundRequest
-	(*FetchRefundResponse)(nil),   // 11: payrail.gateway.v1.FetchRefundResponse
-	nil,                           // 12: payrail.gateway.v1.CreateOrderResponse.ClientParamsEntry
-	nil,                           // 13: payrail.gateway.v1.VerifyWebhookRequest.HeadersEntry
+	(Gateway)(0),                         // 0: payrail.gateway.v1.Gateway
+	(Currency)(0),                        // 1: payrail.gateway.v1.Currency
+	(PaymentStatus)(0),                   // 2: payrail.gateway.v1.PaymentStatus
+	(RefundStatus)(0),                    // 3: payrail.gateway.v1.RefundStatus
+	(*CreateOrderRequest)(nil),           // 4: payrail.gateway.v1.CreateOrderRequest
+	(*CreateOrderResponse)(nil),          // 5: payrail.gateway.v1.CreateOrderResponse
+	(*VerifyWebhookRequest)(nil),         // 6: payrail.gateway.v1.VerifyWebhookRequest
+	(*VerifyWebhookResponse)(nil),        // 7: payrail.gateway.v1.VerifyWebhookResponse
+	(*FetchPaymentRequest)(nil),          // 8: payrail.gateway.v1.FetchPaymentRequest
+	(*FetchPaymentResponse)(nil),         // 9: payrail.gateway.v1.FetchPaymentResponse
+	(*FetchRefundRequest)(nil),           // 10: payrail.gateway.v1.FetchRefundRequest
+	(*FetchRefundResponse)(nil),          // 11: payrail.gateway.v1.FetchRefundResponse
+	(*CaptureRequest)(nil),               // 12: payrail.gateway.v1.CaptureRequest
+	(*CaptureResponse)(nil),              // 13: payrail.gateway.v1.CaptureResponse
+	(*CreateRefundRequest)(nil),          // 14: payrail.gateway.v1.CreateRefundRequest
+	(*CreateRefundResponse)(nil),         // 15: payrail.gateway.v1.CreateRefundResponse
+	(*FindOrderByReferenceRequest)(nil),  // 16: payrail.gateway.v1.FindOrderByReferenceRequest
+	(*FindOrderByReferenceResponse)(nil), // 17: payrail.gateway.v1.FindOrderByReferenceResponse
+	nil,                                  // 18: payrail.gateway.v1.CreateOrderResponse.ClientParamsEntry
+	nil,                                  // 19: payrail.gateway.v1.VerifyWebhookRequest.HeadersEntry
 }
 var file_gateway_v1_gateway_proto_depIdxs = []int32{
 	0,  // 0: payrail.gateway.v1.CreateOrderRequest.gateway:type_name -> payrail.gateway.v1.Gateway
 	1,  // 1: payrail.gateway.v1.CreateOrderRequest.currency:type_name -> payrail.gateway.v1.Currency
-	12, // 2: payrail.gateway.v1.CreateOrderResponse.client_params:type_name -> payrail.gateway.v1.CreateOrderResponse.ClientParamsEntry
+	18, // 2: payrail.gateway.v1.CreateOrderResponse.client_params:type_name -> payrail.gateway.v1.CreateOrderResponse.ClientParamsEntry
 	0,  // 3: payrail.gateway.v1.VerifyWebhookRequest.gateway:type_name -> payrail.gateway.v1.Gateway
-	13, // 4: payrail.gateway.v1.VerifyWebhookRequest.headers:type_name -> payrail.gateway.v1.VerifyWebhookRequest.HeadersEntry
+	19, // 4: payrail.gateway.v1.VerifyWebhookRequest.headers:type_name -> payrail.gateway.v1.VerifyWebhookRequest.HeadersEntry
 	0,  // 5: payrail.gateway.v1.FetchPaymentRequest.gateway:type_name -> payrail.gateway.v1.Gateway
 	2,  // 6: payrail.gateway.v1.FetchPaymentResponse.status:type_name -> payrail.gateway.v1.PaymentStatus
 	1,  // 7: payrail.gateway.v1.FetchPaymentResponse.currency:type_name -> payrail.gateway.v1.Currency
 	0,  // 8: payrail.gateway.v1.FetchRefundRequest.gateway:type_name -> payrail.gateway.v1.Gateway
 	3,  // 9: payrail.gateway.v1.FetchRefundResponse.status:type_name -> payrail.gateway.v1.RefundStatus
-	4,  // 10: payrail.gateway.v1.GatewayService.CreateOrder:input_type -> payrail.gateway.v1.CreateOrderRequest
-	6,  // 11: payrail.gateway.v1.GatewayService.VerifyWebhook:input_type -> payrail.gateway.v1.VerifyWebhookRequest
-	8,  // 12: payrail.gateway.v1.GatewayService.FetchPayment:input_type -> payrail.gateway.v1.FetchPaymentRequest
-	10, // 13: payrail.gateway.v1.GatewayService.FetchRefund:input_type -> payrail.gateway.v1.FetchRefundRequest
-	5,  // 14: payrail.gateway.v1.GatewayService.CreateOrder:output_type -> payrail.gateway.v1.CreateOrderResponse
-	7,  // 15: payrail.gateway.v1.GatewayService.VerifyWebhook:output_type -> payrail.gateway.v1.VerifyWebhookResponse
-	9,  // 16: payrail.gateway.v1.GatewayService.FetchPayment:output_type -> payrail.gateway.v1.FetchPaymentResponse
-	11, // 17: payrail.gateway.v1.GatewayService.FetchRefund:output_type -> payrail.gateway.v1.FetchRefundResponse
-	14, // [14:18] is the sub-list for method output_type
-	10, // [10:14] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	0,  // 10: payrail.gateway.v1.CaptureRequest.gateway:type_name -> payrail.gateway.v1.Gateway
+	1,  // 11: payrail.gateway.v1.CaptureRequest.currency:type_name -> payrail.gateway.v1.Currency
+	2,  // 12: payrail.gateway.v1.CaptureResponse.status:type_name -> payrail.gateway.v1.PaymentStatus
+	0,  // 13: payrail.gateway.v1.CreateRefundRequest.gateway:type_name -> payrail.gateway.v1.Gateway
+	1,  // 14: payrail.gateway.v1.CreateRefundRequest.currency:type_name -> payrail.gateway.v1.Currency
+	3,  // 15: payrail.gateway.v1.CreateRefundResponse.status:type_name -> payrail.gateway.v1.RefundStatus
+	0,  // 16: payrail.gateway.v1.FindOrderByReferenceRequest.gateway:type_name -> payrail.gateway.v1.Gateway
+	2,  // 17: payrail.gateway.v1.FindOrderByReferenceResponse.status:type_name -> payrail.gateway.v1.PaymentStatus
+	1,  // 18: payrail.gateway.v1.FindOrderByReferenceResponse.currency:type_name -> payrail.gateway.v1.Currency
+	4,  // 19: payrail.gateway.v1.GatewayService.CreateOrder:input_type -> payrail.gateway.v1.CreateOrderRequest
+	6,  // 20: payrail.gateway.v1.GatewayService.VerifyWebhook:input_type -> payrail.gateway.v1.VerifyWebhookRequest
+	8,  // 21: payrail.gateway.v1.GatewayService.FetchPayment:input_type -> payrail.gateway.v1.FetchPaymentRequest
+	10, // 22: payrail.gateway.v1.GatewayService.FetchRefund:input_type -> payrail.gateway.v1.FetchRefundRequest
+	12, // 23: payrail.gateway.v1.GatewayService.CapturePayment:input_type -> payrail.gateway.v1.CaptureRequest
+	14, // 24: payrail.gateway.v1.GatewayService.CreateRefund:input_type -> payrail.gateway.v1.CreateRefundRequest
+	16, // 25: payrail.gateway.v1.GatewayService.FindOrderByReference:input_type -> payrail.gateway.v1.FindOrderByReferenceRequest
+	5,  // 26: payrail.gateway.v1.GatewayService.CreateOrder:output_type -> payrail.gateway.v1.CreateOrderResponse
+	7,  // 27: payrail.gateway.v1.GatewayService.VerifyWebhook:output_type -> payrail.gateway.v1.VerifyWebhookResponse
+	9,  // 28: payrail.gateway.v1.GatewayService.FetchPayment:output_type -> payrail.gateway.v1.FetchPaymentResponse
+	11, // 29: payrail.gateway.v1.GatewayService.FetchRefund:output_type -> payrail.gateway.v1.FetchRefundResponse
+	13, // 30: payrail.gateway.v1.GatewayService.CapturePayment:output_type -> payrail.gateway.v1.CaptureResponse
+	15, // 31: payrail.gateway.v1.GatewayService.CreateRefund:output_type -> payrail.gateway.v1.CreateRefundResponse
+	17, // 32: payrail.gateway.v1.GatewayService.FindOrderByReference:output_type -> payrail.gateway.v1.FindOrderByReferenceResponse
+	26, // [26:33] is the sub-list for method output_type
+	19, // [19:26] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_gateway_v1_gateway_proto_init() }
@@ -847,7 +1282,7 @@ func file_gateway_v1_gateway_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gateway_v1_gateway_proto_rawDesc), len(file_gateway_v1_gateway_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   10,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

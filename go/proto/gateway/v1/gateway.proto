@@ -44,6 +44,9 @@ service GatewayService {
     rpc VerifyWebhook (VerifyWebhookRequest) returns (VerifyWebhookResponse);
     rpc FetchPayment(FetchPaymentRequest) returns (FetchPaymentResponse);
     rpc FetchRefund(FetchRefundRequest) returns (FetchRefundResponse);
+    rpc CapturePayment(CaptureRequest) returns (CaptureResponse);
+    rpc CreateRefund(CreateRefundRequest) returns (CreateRefundResponse);
+    rpc FindOrderByReference(FindOrderByReferenceRequest) returns (FindOrderByReferenceResponse);
 }
 
 message CreateOrderRequest {
@@ -90,4 +93,43 @@ message FetchRefundResponse {
   RefundStatus status = 1;
   string gateway_refund_id = 2;
   int64 amount_minor = 3;
+}
+
+message CaptureRequest {
+    Gateway gateway = 1;
+    string gateway_payment_id = 2;
+    int64 amount_minor = 3;
+    Currency currency = 4;
+}
+
+message CaptureResponse {
+    PaymentStatus status = 1;
+    string gateway_payment_id = 2;
+    int64 amount_minor = 3;
+}
+
+message CreateRefundRequest {
+    Gateway gateway = 1;
+    string gateway_payment_id = 2;
+    int64 amount_minor = 3;
+    Currency currency = 4;
+    string idempotency_key = 5;
+}
+
+message CreateRefundResponse {
+    RefundStatus status = 1;
+    string gateway_refund_id = 2;
+}
+
+message FindOrderByReferenceRequest {
+    Gateway gateway = 1;
+    string merchant_reference = 2;
+}
+
+message FindOrderByReferenceResponse {
+    bool found = 1;
+    string gateway_order_id = 2;
+    PaymentStatus status = 3;
+    int64 amount_minor = 4;
+    Currency currency = 5;
 }

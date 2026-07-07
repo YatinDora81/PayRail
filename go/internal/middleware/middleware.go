@@ -25,48 +25,47 @@ const (
 	userIDKey
 )
 
-
-func RequestId(next http.Handler) http.Handler{
-	return http.HandlerFunc(func (w http.ResponseWriter , r *http.Request){
+func RequestId(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get("X-Request-Id")
-		if id == ""{
+		if id == "" {
 			id = newID()
 		}
-		w.Header().Set("X-Request-Id" , id)
-		next.ServeHTTP(w , r.WithContext(context.WithValue(r.Context() , reqIDKey , id)))
+		w.Header().Set("X-Request-Id", id)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), reqIDKey, id)))
 	})
 }
 
-func GetRequestId(ctx context.Context)string{
-	if v , ok := ctx.Value(reqIDKey).(string) ; ok{
+func GetRequestId(ctx context.Context) string {
+	if v, ok := ctx.Value(reqIDKey).(string); ok {
 		return v
 	}
 	return ""
 }
 
-func UserID(ctx context.Context)string{
-	id , _ := ctx.Value(userIDKey).(string)
+func UserID(ctx context.Context) string {
+	id, _ := ctx.Value(userIDKey).(string)
 	return id
 }
 
-func newID() string{
+func newID() string {
 	var b [12]byte
-	_,_ = rand.Read(b[:])
+	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
 }
 
-func RealIP(next http.Handler)http.Handler{
-	return http.HandlerFunc(func (w http.ResponseWriter , r * http.Request){
-		if ip := clientIP(r);ip!=""{
+func RealIP(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ip := clientIP(r); ip != "" {
 			r.RemoteAddr = ip
 		}
-		next.ServeHTTP(w,r)
+		next.ServeHTTP(w, r)
 	})
 }
 
-func clientIP(r *http.Request)string{
-	if xff := r.Header.Get("X-Forwarded-For") ; xff!=""{
-		if i := strings.IndexByte(xff , ',');i>=0{
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if i := strings.IndexByte(xff, ','); i >= 0 {
 			return strings.TrimSpace(xff[:i])
 		}
 		return strings.TrimSpace(xff)
@@ -74,78 +73,77 @@ func clientIP(r *http.Request)string{
 	return r.Header.Get("X-Real-Ip")
 }
 
-func Recoverer(logger *slog.Logger) func(http.Handler) http.Handler{
-	return func(next http.Handler) http.Handler{
-		return http.HandlerFunc(func (w http.ResponseWriter , r *http.Request){
-			defer func(){
-				if rec := recover(); rec != nil{
-					logger.Error("panic recovered" , "err" , rec , "path", r.URL.Path, "traceId" , GetRequestId(r.Context()))
-					w.Header().Set("Content-Type" , "application/json")
+func Recoverer(logger *slog.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() {
+				if rec := recover(); rec != nil {
+					logger.Error("panic recovered", "err", rec, "path", r.URL.Path, "traceId", GetRequestId(r.Context()))
+					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusInternalServerError)
-					_ ,_ = w.Write([]byte(`{"error":{"code":"internal_error","message":"something went wrong"}`))
+					_, _ = w.Write([]byte(`{"error":{"code":"internal_error","message":"something went wrong"}`))
 				}
 			}()
-			next.ServeHTTP(w,r)
+			next.ServeHTTP(w, r)
 		})
 	}
 }
 
-func Timeout(d time.Duration) func(http.Handler) http.Handler{
-	return func (next http.Handler) http.Handler{
-		return http.HandlerFunc(func(w http.ResponseWriter , r *http.Request){
-			ctx , cancel := context.WithTimeout(r.Context() , d)
+func Timeout(d time.Duration) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx, cancel := context.WithTimeout(r.Context(), d)
 			defer cancel()
-			next.ServeHTTP(w , r.WithContext(ctx))
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
-func Logger(logger *slog.Logger) func(http.Handler) http.Handler{
-	return func (next http.Handler) http.Handler{
-		return http.HandlerFunc(func (w http.ResponseWriter , r *http.Request){
+func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 			rec := &recorder{
 				ResponseWriter: w,
-				status: http.StatusOK,
+				status:         http.StatusOK,
 			}
-			next.ServeHTTP(rec , r)
-			logger.Info("request" , "method", r.Method,
+			next.ServeHTTP(rec, r)
+			logger.Info("request", "method", r.Method,
 				"path", r.URL.Path,
 				"status", rec.status,
 				"bytes", rec.bytes,
 				"durationMs", time.Since(start).Milliseconds(),
-				"traceId", GetRequestId(r.Context()),)
+				"traceId", GetRequestId(r.Context()))
 		})
 	}
 }
 
-
-type recorder struct{
+type recorder struct {
 	http.ResponseWriter
 	status int
-	bytes int
+	bytes  int
 }
 
-func (rec *recorder) WriteHeader(code int){
+func (rec *recorder) WriteHeader(code int) {
 	rec.status = code
 	rec.ResponseWriter.WriteHeader(code)
 }
 
-func (rec *recorder)Write(b []byte)(int , error){
-	n , err := rec.ResponseWriter.Write(b)
+func (rec *recorder) Write(b []byte) (int, error) {
+	n, err := rec.ResponseWriter.Write(b)
 	rec.bytes += n
-	return n , err
+	return n, err
 }
 
 var errBadToken = errors.New("invalid bearer token")
 
-type UserJWTConfig struct{
-	Secrets [][]byte
-	Issuer string
+type UserJWTConfig struct {
+	Secrets  [][]byte
+	Issuer   string
 	Audience string
 }
 
-type userClaims struct{
+type userClaims struct {
 	Sub string `json:"sub"`
 	Iss string `json:"iss"`
 	Aud string `json:"aud"`
@@ -154,10 +152,10 @@ type userClaims struct{
 }
 
 func UserAuth(cfg UserJWTConfig) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler{
-		return http.HandlerFunc(func(w http.ResponseWriter , r *http.Request){
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			raw := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-			sub , err := verifyHS256(raw , cfg , time.Now())
+			sub, err := verifyHS256(raw, cfg, time.Now())
 			if err != nil {
 				w.Header().Set("WWW-Authenticate", "Bearer")
 				w.Header().Set("Content-Type", "application/json")
@@ -165,7 +163,7 @@ func UserAuth(cfg UserJWTConfig) func(http.Handler) http.Handler {
 				_, _ = w.Write([]byte(`{"error":{"code":"UNAUTHORIZED","message":"missing or invalid bearer token"}}`))
 				return
 			}
-			next.ServeHTTP(w , r.WithContext(context.WithValue(r.Context() , userIDKey , sub)))
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userIDKey, sub)))
 		})
 	}
 }
@@ -219,27 +217,27 @@ func verifyHS256(token string, cfg UserJWTConfig, now time.Time) (string, error)
 	return c.Sub, nil
 }
 
-func RateAllow(allow AllowFunc) func(http.Handler) http.Handler{
-	return func(next http.Handler) http.Handler{
-		return http.HandlerFunc(func(w http.ResponseWriter , r *http.Request){
+func RateAllow(allow AllowFunc) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			key := UserID(r.Context()) + "|" + clientIP(r)
-			if !allow(r.Context(), key){
+			if !allow(r.Context(), key) {
 				w.Header().Set("Retry-After", "60")
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusTooManyRequests)
-				_,_ = w.Write([]byte(`{"error":{"code":"RATE_LIMITED","message":"too many requests"}}`))
-				return 
+				_, _ = w.Write([]byte(`{"error":{"code":"RATE_LIMITED","message":"too many requests"}}`))
+				return
 			}
-			next.ServeHTTP(w,r)
+			next.ServeHTTP(w, r)
 		})
 	}
 }
 
-func BodyLimit(n int64)func(http.Handler) http.Handler{
-	return func(next http.Handler) http.Handler{
-		return http.HandlerFunc(func(w http.ResponseWriter , r *http.Request){
-			r.Body = http.MaxBytesReader(w,r.Body,n)
-			next.ServeHTTP(w,r)
+func BodyLimit(n int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = http.MaxBytesReader(w, r.Body, n)
+			next.ServeHTTP(w, r)
 		})
 	}
 }
