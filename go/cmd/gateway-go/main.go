@@ -41,5 +41,16 @@ func run() error {
 	if cfg.Razorpay.KeyID != "" {
 		providers = append(providers, gateway.NewRazorpay(cfg.Razorpay.KeyID, cfg.Razorpay.KeySecret, cfg.Razorpay.WebhookSecret, cfg.Razorpay.BaseURL))
 	}
+	if cfg.Stripe.SecretKey != "" {
+		providers = append(providers, gateway.NewStripe(cfg.Stripe.SecretKey, cfg.Stripe.PublishableKey, cfg.Stripe.WebhookSecret, cfg.Stripe.BaseURL))
+	}
+	if cfg.Cashfree.AppID != "" {
+		providers = append(providers, gateway.NewCashfree(cfg.Cashfree.AppID, cfg.Cashfree.SecretKey, cfg.Cashfree.WebhookSecret, cfg.Cashfree.BaseURL, cfg))
+	}
+	if cfg.PayPal.ClientID != "" {
+		providers = append(providers, gateway.NewPayPal(cfg.PayPal.ClientID, cfg.PayPal.Secret, cfg.PayPal.WebhookID, cfg.PayPal.BaseURL, cfg))
+	}
+
+	
 	return nil
 }
