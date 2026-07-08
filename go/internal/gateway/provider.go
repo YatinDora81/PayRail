@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 )
 
@@ -55,4 +56,14 @@ func hmacSHA256Hex(key, msg []byte) string {
 
 func secureEqual(a, b string) bool {
 	return hmac.Equal([]byte(a), []byte(b))
+}
+
+// // INR/USD/EUR/GBP/AED/SGD All These Currencies have upto 2 decimals
+func minorToDecimal(amountMinor int64, _ string) string {
+	whole := amountMinor / 100
+	frac := amountMinor % 100
+	if frac < 0 {
+		frac = -frac
+	}
+	return fmt.Sprintf("%d.%02d", whole, frac)
 }
