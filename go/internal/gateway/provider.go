@@ -48,6 +48,31 @@ type Registry struct {
 	providers map[string]Provider
 }
 
+func NewRegistry(ps ...Provider) *Registry {
+	m := make(map[string]Provider, len(ps))
+	for _, p := range ps {
+		if p != nil {
+			m[p.Name()] = p
+		}
+	}
+	return &Registry{
+		providers: m,
+	}
+}
+
+func (r *Registry) Get(name string) (Provider, bool) {
+	p, ok := r.providers[name]
+	return p, ok
+}
+
+func (r *Registry) Names() []string {
+	out := make([]string, 0, len(r.providers))
+	for n := range r.providers {
+		out = append(out, n)
+	}
+	return out
+}
+
 func hmacSHA256Hex(key, msg []byte) string {
 	mac := hmac.New(sha256.New, key)
 	mac.Write(msg)

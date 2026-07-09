@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -215,7 +216,8 @@ func (p *PayPal) FetchPayment(ctx context.Context, gatewayOrderID string) (Fetch
 	defer resp.Body.Close()
 
 	if resp.StatusCode/100 != 2 {
-		return FetchPaymentResult{}, fmt.Errorf("paypal fetch order: status %d", resp.StatusCode)
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return FetchPaymentResult{}, fmt.Errorf("paypal fetch order: status %d: %s", resp.StatusCode, snippet)
 	}
 
 	var out struct {
@@ -236,29 +238,38 @@ func (p *PayPal) FetchPayment(ctx context.Context, gatewayOrderID string) (Fetch
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return FetchPaymentResult{}, fmt.Errorf("paypal decode: %w", err)
 	}
+
 	res := FetchPaymentResult{Status: "PENDING"}
 
-	switch out.Status {
-	case "COMPLETED":
-		res.Status = "CAPTURED"
-	case "VOIDED":
+	if out.Status == "VOIDED" {
 		res.Status = "EXPIRED"
 	}
 
-	var totalAmount int64
+	var hasCompleted, hasPending, hasDeclined bool
 	for _, pu := range out.PurchaseUnits {
 		for _, cap := range pu.Payments.Captures {
-			if cap.Status == "COMPLETED" {
-				totalAmount += decimalStringToMinorPP(cap.Amount.Value)
-			}
-			if res.Currency == "" {
+			switch cap.Status {
+			case "COMPLETED", "PARTIALLY_REFUNDED", "REFUNDED":
+				hasCompleted = true
+				res.AmountMinor += decimalStringToMinorPP(cap.Amount.Value)
 				res.Currency = cap.Amount.CurrencyCode
+				res.GatewayPaymentID = cap.ID
+			case "PENDING":
+				hasPending = true
+			case "DECLINED", "FAILED":
+				hasDeclined = true
+
 			}
-			res.GatewayPaymentID = cap.ID // keep latest capture id
 		}
 	}
 
-	res.AmountMinor = totalAmount
+	switch {
+	case hasCompleted:
+		res.Status = "CAPTURED"
+	case hasDeclined && !hasPending && res.Status == "PENDING":
+		res.Status = "FAILED"
+	}
+
 	return res, nil
 }
 
