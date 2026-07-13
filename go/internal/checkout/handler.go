@@ -39,7 +39,7 @@ func (h *Handler) ListPlans(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	httpx.WriteJSON(w , http.StatusOK , out)
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 type planResponse struct {
@@ -49,4 +49,43 @@ type planResponse struct {
 	Credits     int    `json:"credits"`
 	Currency    string `json:"currency"`
 	Amount      string `json:"amount"`
+}
+
+func (h *Handler) BankOffers(w http.ResponseWriter, r *http.Request) {
+	traceID := httpx.TraceID(r)
+	country := r.URL.Query().Get("country")
+	if country == "" {
+		country = "US"
+	}
+	offers, err := h.svc.BankOffers(r.Context(), country)
+	if err != nil {
+		h.logger.Error("list bank offers", "err", err, "traceId", traceID)
+		httpx.WriteError(w, traceID, httpx.Internal())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, offers)
+}
+
+type previewRequest struct {
+	PlanID      string `json:"planId"`
+	Country     string `json:"country"`
+	City        string `json:"city"`
+	PromotionID string `json:"promotionId"`
+}
+
+func (h *Handler) PreviewOrder(w http.ResponseWriter, r *http.Request) {
+	traceID := httpx.TraceID(r)
+	var req previewRequest
+
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.WriteError(w, traceID, err)
+		return
+	}
+
+	if req.PlanID == "" || req.Country == "" {
+		httpx.WriteError(w, traceID, httpx.BadRequest("planId and country are required"))
+		return
+	}
+
+	
 }
