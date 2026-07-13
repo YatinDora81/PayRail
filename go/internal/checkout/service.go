@@ -1,6 +1,7 @@
 package checkout
 
 import (
+	"context"
 	"log/slog"
 	"time"
 
@@ -19,4 +20,8 @@ type Service struct {
 
 func NewService(db *store.Store, b *budget.Gate, gw *gatewayclient.Client, ttl time.Duration, logger *slog.Logger) *Service {
 	return &Service{db: db, budget: b, gateway: gw, orderTTL: ttl, logger: logger}
+}
+
+func (s *Service) ListPlans(ctx context.Context, country string) ([]store.PlanForList, error) {
+	return s.db.ListPlans(ctx, country)
 }
