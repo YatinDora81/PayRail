@@ -143,7 +143,6 @@ func (s *Store) queryPricing(ctx context.Context, q string, args ...any) (Pricin
 	return pr, err
 }
 
-
 type CheckoutPromotion struct {
 	ID             string
 	EffectType     string // PERCENT_BPS | FLAT_AMOUNT | BONUS_CREDITS
@@ -155,6 +154,41 @@ type CheckoutPromotion struct {
 	PerUserLimit   int     // max redemptions per user (0 = unlimited)
 	MaxRedemptions *int    // global redemption cap (nil = unlimited)
 }
-func (s *Store)GetCheckoutPromotion(ctx context.Context,promoID , currency string)(GetCheckoutPromotion , error){
-	
+
+func (s *Store) GetCheckoutPromotion(ctx context.Context, promoID, currency string) (CheckoutPromotion, error) {
+	const query = `SELECT pr."id", e."effectType",
+		       COALESCE(e."valueBps", 0), COALESCE(e."amountMinor", 0), COALESCE(e."bonusCredits", 0),
+		       EXISTS(SELECT 1 FROM "PromotionBudget" b
+		              WHERE b."promotionId" = pr."id" AND b."currency" = $2),
+		       c."id", COALESCE(c."perUserLimit", 0), c."maxRedemptions"
+		FROM "Promotions" pr
+		JOIN "PromotionEffects" e ON e."promotionId" = pr."id"
+		LEFT JOIN "CouponCode" c ON c."promotionId" = pr."id" AND c."isActive" = true
+		WHERE pr."id" = $1 AND pr."isActive" = true
+		  AND pr."startsAt" <= now() AND pr."endsAt" >= now()
+		ORDER BY e."createdAt" ASC
+		LIMIT 1`
+
+	var p CheckoutPromotion
+	err := s.pool.QueryRow(ctx, query, promoID, currency).Scan(&p.ID, &p.EffectType, &p.ValueBps, &p.AmountMinor, &p.BonusCredits, &p.HasBudget,
+		&p.CouponID, &p.PerUserLimit, &p.MaxRedemptions)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CheckoutPromotion{}, ErrNotFound
+	}
+
+	return p, err
+}
+
+var gstBpsByCurrency = map[string]int64{
+	"INR": 1800, // 18% GST — the series §7's gapless numbering exists for
+	// USD/EUR/GBP/AED/SGD default to 0 until finance configures the market.
+}
+
+func TaxIncludedMinor(currency string, amountMinor int64) int64 {
+	bps := gstBpsByCurrency[currency]
+	if bps <= 0 || amountMinor <= 0 {
+		return 0
+	}
+	return amountMinor * bps / (10000 + bps)
 }
