@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -143,41 +144,112 @@ func (s *Store) queryPricing(ctx context.Context, q string, args ...any) (Pricin
 	return pr, err
 }
 
-type CheckoutPromotion struct {
-	ID             string
-	EffectType     string // PERCENT_BPS | FLAT_AMOUNT | BONUS_CREDITS
-	ValueBps       int
-	AmountMinor    int64
-	BonusCredits   int
-	HasBudget      bool    // true if a PromotionBudget row exists for this currency
-	CouponID       *string // the coupon that scopes redemption limits, if any
-	PerUserLimit   int     // max redemptions per user (0 = unlimited)
-	MaxRedemptions *int    // global redemption cap (nil = unlimited)
+type PromotionEffect struct {
+	EffectType   string // PERCENT_BPS | FLAT_AMOUNT | BONUS_CREDITS
+	ValueBps     int
+	AmountMinor  int64
+	BonusCredits int
 }
 
-func (s *Store) GetCheckoutPromotion(ctx context.Context, promoID, currency string) (CheckoutPromotion, error) {
-	const query = `SELECT pr."id", e."effectType",
-		       COALESCE(e."valueBps", 0), COALESCE(e."amountMinor", 0), COALESCE(e."bonusCredits", 0),
-		       EXISTS(SELECT 1 FROM "PromotionBudget" b
-		              WHERE b."promotionId" = pr."id" AND b."currency" = $2),
-		       c."id", COALESCE(c."perUserLimit", 0), c."maxRedemptions"
-		FROM "Promotions" pr
-		JOIN "PromotionEffects" e ON e."promotionId" = pr."id"
-		LEFT JOIN "CouponCode" c ON c."promotionId" = pr."id" AND c."isActive" = true
-		WHERE pr."id" = $1 AND pr."isActive" = true
-		  AND pr."startsAt" <= now() AND pr."endsAt" >= now()
-		ORDER BY e."createdAt" ASC
-		LIMIT 1`
+type CheckoutPromotion struct {
+	ID                   string
+	StackingMode         string // EXCLUSIVE | STACKABLE
+	Priority             int
+	CreatedAt            time.Time
+	Effects              []PromotionEffect
+	HasAnyBudget         bool    // ≥1 PromotionBudget row exists for this promo
+	HasBudgetForCurrency bool    // …and one exists for the checkout currency
+	CouponID             *string // OLDEST active coupon — deterministic (lateral)
+	PerUserLimit         int     // max redemptions per user (0 = unlimited)
+	MaxRedemptions       *int
+}
 
-	var p CheckoutPromotion
-	err := s.pool.QueryRow(ctx, query, promoID, currency).Scan(&p.ID, &p.EffectType, &p.ValueBps, &p.AmountMinor, &p.BonusCredits, &p.HasBudget,
-		&p.CouponID, &p.PerUserLimit, &p.MaxRedemptions)
+func (s *Store) GetCheckoutPromotions(ctx context.Context, promoIDs []string, currency string) ([]CheckoutPromotion, error) {
+	const query = `
+			WITH budget_flags AS (
+				SELECT "promotionId",
+						true                     AS "hasAnyBudget",
+						bool_or("currency" = $2) AS "hasBudgetForCurrency"
+				FROM "PromotionBudget"
+				WHERE "promotionId" = ANY($1)          -- NEW: only the promos we're pricing
+				GROUP BY "promotionId"
+				),
+			oldest_coupon AS (
+				SELECT DISTINCT ON (cc."promotionId")
+						cc."promotionId", cc."id", cc."perUserLimit", cc."maxRedemptions"
+				FROM "CouponCode" cc
+				WHERE cc."promotionId" = ANY($1)       -- NEW: same scope as the outer query
+					AND cc."isActive" = true
+					AND (cc."startsAt" IS NULL OR cc."startsAt" <= now())
+					AND (cc."endsAt"   IS NULL OR cc."endsAt"   >= now())
+				ORDER BY cc."promotionId", cc."createdAt" ASC
+				)
+			SELECT pr."id", pr."stackingMode", pr."priority", pr."createdAt",
+					e."effectType",
+					COALESCE(e."valueBps", 0), COALESCE(e."amountMinor", 0), COALESCE(e."bonusCredits", 0),
+					COALESCE(bf."hasAnyBudget", false),
+					COALESCE(bf."hasBudgetForCurrency", false),
+					c."id", COALESCE(c."perUserLimit", 0), c."maxRedemptions"
+			FROM "Promotions" pr
+			LEFT JOIN "PromotionEffects" e ON e."promotionId" = pr."id"
+			AND (e."currency" IS NULL OR e."currency" = $2)
+			LEFT JOIN budget_flags  bf ON bf."promotionId" = pr."id"
+			LEFT JOIN oldest_coupon c  ON c."promotionId"  = pr."id"
+			WHERE pr."id" = ANY($1) AND pr."isActive" = true
+			AND pr."startsAt" <= now() AND pr."endsAt" >= now()
+			ORDER BY pr."id", e."createdAt" ASC
+	`
 
-	if errors.Is(err, pgx.ErrNoRows) {
-		return CheckoutPromotion{}, ErrNotFound
+	rows, err := s.pool.Query(ctx, query, promoIDs, currency)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	byID := map[string]*CheckoutPromotion{}
+	var order []string
+
+	for rows.Next() {
+		var (
+			p  CheckoutPromotion
+			et *string // NULL when the promo has no effect in this currency
+			e  PromotionEffect
+		)
+
+		if err := rows.Scan(&p.ID, &p.StackingMode, &p.Priority, &p.CreatedAt,
+			&et, &e.ValueBps, &e.AmountMinor, &e.BonusCredits,
+			&p.HasAnyBudget, &p.HasBudgetForCurrency,
+			&p.CouponID, &p.PerUserLimit, &p.MaxRedemptions,
+		); err != nil {
+			return nil, err
+		}
+
+		cur, ok := byID[p.ID]
+		if !ok {
+			cp := p
+			byID[p.ID] = &cp
+			order = append(order, p.ID)
+			cur = &cp
+		}
+		if et != nil {
+			e.EffectType = *et
+			cur.Effects = append(cur.Effects, e)
+		}
 	}
 
-	return p, err
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if len(order) != len(promoIDs) { // handler dedupes, so counts must match
+		return nil, ErrNotFound // ≥1 id missing / inactive / out of window
+	}
+
+	out := make([]CheckoutPromotion, 0, len(order))
+	for _, id := range order {
+		out = append(out, *byID[id])
+	}
+	return out, nil
 }
 
 var gstBpsByCurrency = map[string]int64{
@@ -191,4 +263,54 @@ func TaxIncludedMinor(currency string, amountMinor int64) int64 {
 		return 0
 	}
 	return amountMinor * bps / (10000 + bps)
+}
+
+type CheckoutCoupon struct {
+	ID             string
+	PromotionID    string
+	PerUserLimit   int // 0 = unlimited
+	MaxRedemptions *int
+}
+
+func (s *Store) ResolveCouponCode(ctx context.Context, code string) (CheckoutCoupon, error) {
+	const q = `
+		SELECT cc."id", cc."promotionId", COALESCE(cc."perUserLimit", 0), cc."maxRedemptions"
+		FROM "CouponCode" cc
+		WHERE cc."code" = upper($1) AND cc."isActive" = true
+		  AND (cc."startsAt" IS NULL OR cc."startsAt" <= now())
+		  AND (cc."endsAt"   IS NULL OR cc."endsAt"   >= now())`
+	var c CheckoutCoupon
+	err := s.pool.QueryRow(ctx, q, code).Scan(
+		&c.ID, &c.PromotionID, &c.PerUserLimit, &c.MaxRedemptions,
+	)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CheckoutCoupon{}, ErrNotFound
+	}
+	return c, err
+}
+
+type PromotionRule struct {
+	PromotionID string
+	RuleType    string
+	Config      []byte
+}
+
+func (s *Store) GetPromotionRules(ctx context.Context, promoIDs []string)([]PromotionRule , error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT "promotionId", "ruleType", "config"
+		FROM "PromotionRules" WHERE "promotionId" = ANY($1)`, promoIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PromotionRule
+	for rows.Next() {
+		var r PromotionRule
+		if err := rows.Scan(&r.PromotionID, &r.RuleType, &r.Config); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }

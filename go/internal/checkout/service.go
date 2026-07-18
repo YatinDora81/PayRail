@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/payrail/go/internal/budget"
+	"github.com/payrail/go/internal/domain"
 	"github.com/payrail/go/internal/gatewayclient"
 	"github.com/payrail/go/internal/httpx"
 	"github.com/payrail/go/internal/store"
@@ -39,8 +40,17 @@ type CreateOrderInput struct {
 	Country        string
 	City           string
 	Gateway        string
-	PromotionID    string // optional
+	PromotionIDs   []string
+	CouponCode     string
 	TraceID        string
+}
+
+type CreateResult struct {
+	// order
+	Gateway        string
+	GatewayOrderID string
+	ClientParams   map[string]any
+	Replayed       bool
 }
 
 type Quote struct {
@@ -50,6 +60,7 @@ type Quote struct {
 	FinalMinor       int64
 	TaxIncludedMinor int64 // GST share inside FinalMinor (inclusive pricing, §7)
 	Credits          int
+	PromoApplied     *bool
 }
 
 func (s *Service) PreviewOrder(ctx context.Context, in CreateOrderInput) (Quote, error) {
@@ -64,18 +75,63 @@ func (s *Service) PreviewOrder(ctx context.Context, in CreateOrderInput) (Quote,
 	}
 
 	discount, credits := int64(0), pricing.Credits
-	if in.PromotionID != "" {
-		promo, perr := s.db.GetCheckoutPromotion(ctx, in.PromotionID, pricing.Currency)
+	var promoApplied *bool
 
+	if len(in.PromotionIDs) > 0 || in.CouponCode != "" {
+		applied := false
+		promoApplied = &applied
+
+		ids := in.PromotionIDs
+		if in.CouponCode != "" {
+			if c, cerr := s.db.ResolveCouponCode(ctx, in.CouponCode); cerr == nil {
+				dup := false
+				for _, id := range ids {
+					if id == c.PromotionID {
+						dup = true
+						break
+					}
+				}
+				if !dup && len(ids) < 3 {
+					ids = append(append([]string{}, ids...), c.PromotionID)
+				}
+			}
+		}
+
+		promos, perr := s.db.GetCheckoutPromotions(ctx, ids, pricing.Currency)
 		if perr != nil && !errors.Is(perr, store.ErrNotFound) {
-			s.logger.Error("load promotion (preview)", "err", perr, "traceId", in.TraceID)
+			s.logger.Error("load promotions (preview)", "err", perr, "traceId", in.TraceID)
 			return Quote{}, httpx.Internal()
 		}
 
 		if perr == nil {
-			d, bonus := computeDiscount(promo, pricing.BaseAmountMinor)
-			discount = clampDiscount(d, pricing.BaseAmountMinor, pricing.MaxDiscountBps)
-			credits += bonus
+			rules, rerr := s.db.GetPromotionRules(ctx, ids)
+			if rerr != nil {
+				s.logger.Error("load promotion rules (preview)", "err", rerr, "traceId", in.TraceID)
+				return Quote{}, httpx.Internal()
+			}
+
+			rulesByPromo := map[string][]domain.Rule{}
+			for _, r := range rules {
+				rulesByPromo[r.PromotionID] = append(rulesByPromo[r.PromotionID], domain.Rule{RuleType: r.RuleType, Config: r.Config})
+			}
+
+			rc := domain.RuleContext{PlanID: pricing.PlanID, Currency: pricing.Currency, BaseAmountMinor: pricing.BaseAmountMinor}
+			var cands []domain.Candidate
+			for _, promo := range promos {
+				if promo.HasAnyBudget && !promo.HasBudgetForCurrency {
+					continue
+				}
+				if len(promo.Effects) == 0 || !domain.RulesAllow(rulesByPromo[promo.ID], rc) {
+					continue
+				}
+				cands = append(cands, domain.Candidate{ID: promo.ID, StackingMode: promo.StackingMode,
+					Priority: promo.Priority, CreatedAt: promo.CreatedAt, Effects: toDomainEffects(promo.Effects)})
+			}
+			if res, rerr := domain.Resolve(cands, pricing.BaseAmountMinor, pricing.MaxDiscountBps); rerr == nil {
+				discount = res.DiscountMinor
+				credits += res.BonusCredits
+				applied = res.DiscountMinor > 0 || res.BonusCredits > 0
+			}
 		}
 	}
 
@@ -85,42 +141,24 @@ func (s *Service) PreviewOrder(ctx context.Context, in CreateOrderInput) (Quote,
 	}
 
 	return Quote{
-		Currency:  pricing.Currency,
-		BaseMinor: pricing.BaseAmountMinor,
-		DiscountMinor: discount,
-		FinalMinor: final,
-		Credits: credits,
-		TaxIncludedMinor: store.TaxIncludedMinor(pricing.Currency , pricing.BaseAmountMinor),
+		Currency:         pricing.Currency,
+		BaseMinor:        pricing.BaseAmountMinor,
+		DiscountMinor:    discount,
+		FinalMinor:       final,
+		TaxIncludedMinor: store.TaxIncludedMinor(pricing.Currency, final),
+		Credits:          credits,
+		PromoApplied:     promoApplied,
 	}, nil
 }
 
-func computeDiscount(p store.CheckoutPromotion, base int64) (discount int64, bonus int) {
-	switch p.EffectType {
-	case "PERCENT_BPS":
-		// base * bps / 10000 (10000 bps = 100%). Safe for realistic amounts.
-		return base * int64(p.ValueBps) / 10000, 0
-	case "FLAT_AMOUNT":
-		if p.AmountMinor > base {
-			return base, 0
-		}
-		return p.AmountMinor, 0
-	case "BONUS_CREDITS":
-		return 0, p.BonusCredits
-	default:
-		return 0, 0
+
+func toDomainEffects(effs []store.PromotionEffect) []domain.Effect {
+	out := make([]domain.Effect, len(effs))
+	for i, e := range effs {
+		out[i] = domain.Effect{EffectType: e.EffectType, ValueBps: e.ValueBps,
+			AmountMinor: e.AmountMinor, BonusCredits: e.BonusCredits}
 	}
+	return out
 }
 
-func clampDiscount(discount, base int64, maxDiscountBps int) int64 {
-	maxAllowed := base * int64(maxDiscountBps) / 10000
-	if discount > maxAllowed {
-		discount = maxAllowed
-	}
-	if discount > base {
-		discount = base
-	}
-	if discount < 0 {
-		discount = 0
-	}
-	return discount
-}
+func (s *Service) CreateOrder() {}
