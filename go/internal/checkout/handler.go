@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/payrail/go/internal/httpx"
 	"github.com/payrail/go/internal/middleware"
+	"github.com/payrail/go/internal/store"
 )
 
 type Handler struct {
@@ -138,4 +140,121 @@ func normalizePromoIDs(ids []string) ([]string, error) {
 
 func userFromRequest(r *http.Request) string {
 	return middleware.UserID(r.Context())
+}
+
+type createOrderRequest struct {
+	PlanID       string   `json:"planId"`
+	Country      string   `json:"country"`
+	City         string   `json:"city"`
+	Gateway      string   `json:"gateway"`
+	PromotionIDs []string `json:"promotionIds"`
+	CouponCode   string   `json:"couponCode"`
+}
+
+func (h *Handler) CreateOrder(w http.ResponseWriter, r *http.Request) {
+
+	traceID := httpx.TraceID(r)
+	var req createOrderRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.WriteError(w, traceID, err)
+		return
+	}
+	if err := req.validate(); err != nil {
+		httpx.WriteError(w, traceID, err)
+		return
+	}
+
+	userID := userFromRequest(r)
+	if userID == "" {
+		httpx.WriteError(w, traceID, httpx.NewError(http.StatusUnauthorized, "unauthorized", "missing user"))
+		return
+	}
+
+	idemKey := r.Header.Get("Idempotency-Key")
+	if idemKey == "" {
+		httpx.WriteError(w, traceID, httpx.BadRequest("Idempotency-Key header is required"))
+		return
+	}
+
+	promoIDs, perr := normalizePromoIDs(req.PromotionIDs)
+	if perr != nil {
+		httpx.WriteError(w, traceID, perr)
+		return
+	}
+
+	result, err := h.svc.CreateOrder(r.Context(), CreateOrderInput{
+		UserID:         userID,
+		IdempotencyKey: idemKey,
+		PlanID:         req.PlanID,
+		Country:        req.Country,
+		City:           req.City,
+		Gateway:        req.Gateway,
+		PromotionIDs:   promoIDs,
+		CouponCode:     strings.ToUpper(strings.TrimSpace(req.CouponCode)), // canonical form at the edge — the DB stores uppercase
+		TraceID:        traceID,
+	})
+	if err != nil {
+		httpx.WriteError(w, traceID, err)
+		return
+	}
+
+	resp := toOrderResponse(result.Order)
+	resp.Gateway = result.Gateway
+	resp.GatewayOrderID = result.GatewayOrderID
+	resp.ClientParams = result.ClientParams
+	resp.Replayed = result.Replayed
+
+	status := http.StatusCreated
+	if result.Replayed {
+		status = http.StatusOK
+	}
+
+	httpx.WriteJSON(w, status, resp)
+}
+
+func (req createOrderRequest) validate() error {
+	switch {
+	case req.PlanID == "":
+		return httpx.BadRequest("planId is required")
+	case req.Country == "":
+		return httpx.BadRequest("country is required")
+	case req.Gateway == "":
+		return httpx.BadRequest("gateway is required")
+	}
+	return nil
+}
+
+type orderResponse struct {
+	OrderID        string         `json:"orderId"`
+	Status         string         `json:"status"`
+	Currency       string         `json:"currency"`
+	BaseAmount     string         `json:"baseAmount"`
+	DiscountAmount string         `json:"discountAmount"`
+	FinalAmount    string         `json:"finalAmount"`
+	CreditsGranted int            `json:"creditsGranted"`
+	ExpiresAt      string         `json:"expiresAt"`
+	Gateway        string         `json:"gateway,omitempty"`
+	GatewayOrderID string         `json:"gatewayOrderId,omitempty"`
+	ClientParams   map[string]any `json:"clientParams,omitempty"`
+	Replayed       bool           `json:"replayed,omitempty"`
+}
+
+func toOrderResponse(o store.Order) orderResponse {
+	resp := orderResponse{
+		OrderID:        o.ID,
+		Status:         o.Status,
+		Currency:       o.Currency,
+		BaseAmount:     strconv.FormatInt(o.BaseAmountMinor, 10),
+		DiscountAmount: strconv.FormatInt(o.DiscountAmountMinor, 10),
+		FinalAmount:    strconv.FormatInt(o.FinalAmountMinor, 10),
+		CreditsGranted: o.CreditsGranted,
+		ExpiresAt:      o.ExpiresAt.UTC().Format(time.RFC3339),
+	}
+	if o.Gateway != nil {
+		resp.Gateway = *o.Gateway
+	}
+	if o.GatewayOrderID != nil {
+		resp.GatewayOrderID = *o.GatewayOrderID
+	}
+	return resp
 }
