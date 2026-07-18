@@ -305,7 +305,7 @@ func (s *Service) CreateOrder(ctx context.Context, in CreateOrderInput) (CreateR
 	order.Status, order.Gateway, order.GatewayOrderID = "PENDING_PAYMENT", &gw, &gid
 
 	succeeded = true
-	
+
 	return CreateResult{
 		Order:          order,
 		Gateway:        in.Gateway,
@@ -514,3 +514,26 @@ func (s *Service) applyPromotions(ctx context.Context, in CreateOrderInput, p st
 	return reservations, res.DiscountMinor, p.Credits + res.BonusCredits, nil
 
 }
+
+func (s *Service) ListOrders(ctx context.Context, userID, cursor string, limit int) ([]store.Order, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 25
+	}
+	return s.db.ListOrdersByUser(ctx, userID, cursor, limit)
+}
+
+func (s *Service) GetOrder(ctx context.Context, id, userID string) (store.Order, error) {
+	o, err := s.db.GetOrderForUser(ctx, id, userID)
+	if errors.Is(err, store.ErrNotFound) {
+		return store.Order{}, httpx.NotFound("order not found")
+	}
+	return o, err
+}
+
+func (s *Service) Credits(ctx context.Context, userID, cursor string, limit int) (store.CreditsSummary, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 25
+	}
+	return s.db.CreditsForUser(ctx, userID, cursor, limit)
+}
+

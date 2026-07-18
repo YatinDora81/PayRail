@@ -583,3 +583,83 @@ func (s *Store) StampGateway(ctx context.Context, orderID, gateway, gatewayOrder
 		WHERE "id" = $1`, orderID, gateway, gatewayOrderID)
 	return err
 }
+
+func (s *Store) ListOrdersByUser(ctx context.Context, userID, cursor string, limit int) ([]Order, error) {
+	const q = `
+		SELECT "id","status","currency","baseAmountMinor","discountAmountMinor","taxAmountMinor","finalAmountMinor","creditsGranted","gateway","gatewayOrderId","expiresAt","createdAt"
+		FROM "Order"
+		WHERE "userId" = $1 AND ($2 = '' OR "id" < $2)  -- '' = first page; else rows strictly older than the cursor id
+		ORDER BY "id" DESC
+		LIMIT $3`
+
+	rows, err := s.pool.Query(ctx, q, userID, cursor, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var out []Order
+
+	for rows.Next() {
+		var o Order
+		if err := rows.Scan(&o.ID, &o.Status, &o.Currency, &o.BaseAmountMinor, &o.DiscountAmountMinor,
+			&o.TaxAmountMinor, &o.FinalAmountMinor, &o.CreditsGranted, &o.Gateway, &o.GatewayOrderID,
+			&o.ExpiresAt, &o.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+
+	return out, rows.Err()
+}
+
+func (s *Store) GetOrderForUser(ctx context.Context, id, userID string) (Order, error) {
+	return s.scanOrder(ctx, `
+		SELECT "id","status","currency","baseAmountMinor","discountAmountMinor","taxAmountMinor","finalAmountMinor","creditsGranted","gateway","gatewayOrderId","expiresAt","createdAt"
+		FROM "Order" WHERE "id" = $1 AND "userId" = $2`, id, userID)
+}
+
+type LedgerEntry struct {
+	ID            string
+	Delta         int
+	Reason        string
+	ReferenceType string
+	ReferenceID   string
+	CreatedAt     time.Time
+}
+
+// CreditsSummary is balance + one page of history.
+type CreditsSummary struct {
+	Balance int64
+	Ledger  []LedgerEntry
+}
+
+func (s *Store) CreditsForUser(ctx context.Context, userID, cursor string, limit int) (CreditsSummary, error) {
+	var out CreditsSummary
+	if err := s.pool.QueryRow(ctx,
+		`SELECT "creditsBalance" FROM "User" WHERE "id" = $1`, userID).Scan(&out.Balance); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return CreditsSummary{}, ErrNotFound
+		}
+		return CreditsSummary{}, err
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT "id","delta","reason","referenceType","referenceId","createdAt"
+		FROM "CreditsLedger"
+		WHERE "userId" = $1 AND ($2 = '' OR "id" < $2)  -- keyset cursor: '' = first page; else strictly-older ids (cuids sort by time)
+		ORDER BY "id" DESC  -- newest first; next cursor = last id of this page
+		LIMIT $3`, userID, cursor, limit)
+	if err != nil {
+		return CreditsSummary{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var e LedgerEntry
+		if err := rows.Scan(&e.ID, &e.Delta, &e.Reason, &e.ReferenceType, &e.ReferenceID, &e.CreatedAt); err != nil {
+			return CreditsSummary{}, err
+		}
+		out.Ledger = append(out.Ledger, e)
+	}
+	return out, rows.Err()
+}

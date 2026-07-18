@@ -241,3 +241,10 @@ func BodyLimit(n int64) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+func Chain(h http.Handler, mw ...func(http.Handler) http.Handler) http.Handler {
+	for i := len(mw) - 1; i >= 0; i-- { // wrap inside-out so the FIRST listed middleware ends up outermost
+		h = mw[i](h)
+	}
+	return h
+}

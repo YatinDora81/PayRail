@@ -77,7 +77,7 @@ func run(logger *slog.Logger) error {
 
 	srv := &http.Server{
 		Addr:    cfg.Addr,
-		Handler: otelhttp.NewHandler(checkout.NewRouter(handler, db, bg, cfg.UserJWTSecret, rateAllow(bg, cfg.RateLimitPerMin), logger), "checkout-api"),
+		Handler: otelhttp.NewHandler(checkout.NewRouter(handler, db, bg, jwtConfig(cfg), rateAllow(bg, cfg.RateLimitPerMin), logger), "checkout-api"),
 	}
 
 	go func() {
@@ -97,6 +97,14 @@ func run(logger *slog.Logger) error {
 	defer cancel()
 
 	return srv.Shutdown(shutdownCtx)
+}
+
+func jwtConfig(cfg config.CheckoutConfig) middleware.UserJWTConfig {
+	secrets := make([][]byte, 0, len(cfg.UserJWTSecrets))
+	for _, s := range cfg.UserJWTSecrets {
+		secrets = append(secrets, []byte(s))
+	}
+	return middleware.UserJWTConfig{Secrets: secrets, Issuer: cfg.UserJWTIssuer, Audience: cfg.UserJWTAudience}
 }
 
 func rateAllow(bg *budget.Gate, perMin int) middleware.AllowFunc {

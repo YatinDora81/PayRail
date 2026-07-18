@@ -258,3 +258,55 @@ func toOrderResponse(o store.Order) orderResponse {
 	}
 	return resp
 }
+
+func (h *Handler) ListOrders(w http.ResponseWriter, r *http.Request) {
+	traceID := httpx.TraceID(r)
+
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	orders, err := h.svc.ListOrders(r.Context(), userFromRequest(r), r.URL.Query().Get("cursor"), limit)
+	if err != nil {
+		h.logger.Error("list orders", "err", err, "traceId", traceID)
+		httpx.WriteError(w, traceID, httpx.Internal())
+		return
+	}
+	out := make([]orderResponse, 0, len(orders))
+	for _, o := range orders {
+		out = append(out, toOrderResponse(o))
+	}
+	next := ""
+	if len(out) > 0 {
+		next = out[len(out)-1].OrderID
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"orders": out, "nextCursor": next})
+}
+
+func (h *Handler) GetOrder(w http.ResponseWriter, r *http.Request) {
+	traceID := httpx.TraceID(r)
+	o, err := h.svc.GetOrder(r.Context(), r.PathValue("id"), userFromRequest(r))
+	if err != nil {
+		httpx.WriteError(w, traceID, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, toOrderResponse(o))
+}
+
+
+func (h *Handler) Credits(w http.ResponseWriter, r *http.Request){
+	traceID := httpx.TraceID(r)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	sum, err := h.svc.Credits(r.Context(), userFromRequest(r), r.URL.Query().Get("cursor"), limit)
+	if err != nil {
+		h.logger.Error("credits summary", "err", err, "traceId", traceID)
+		httpx.WriteError(w, traceID, httpx.Internal())
+		return
+	}
+	entries := make([]map[string]any, 0, len(sum.Ledger))
+	for _, e := range sum.Ledger {
+		entries = append(entries, map[string]any{
+			"delta": e.Delta, "reason": e.Reason,
+			"referenceType": e.ReferenceType, "referenceId": e.ReferenceID,
+			"at": e.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"balance": sum.Balance, "ledger": entries})
+}

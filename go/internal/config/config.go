@@ -4,19 +4,22 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
 type CheckoutConfig struct {
-	Addr            string // ":8080"
+	Addr            string
 	Env             string // "development" | "production"
 	DatabaseURL     string
 	RedisURL        string
-	GatewayTarget   string // gRPC address of gateway-go, e.g. "localhost:8081"
-	GatewayTLS      bool   // dial gateway-go over TLS
+	GatewayTarget   string
+	GatewayTLS      bool
 	OrderTTL        time.Duration
-	UserJWTSecret   string
-	RateLimitPerMin int // per user+ip request budget
+	UserJWTSecrets  []string // HS256 secrets, comma-separated; [0] is current, the rest exist for rotation
+	UserJWTIssuer   string   // required `iss` when set (pins the auth service)
+	UserJWTAudience string   // required `aud` when set (pins THIS service)
+	RateLimitPerMin int      // per user+ip request budget on /v1 (0 disables)
 }
 
 func LoadCheckout() (CheckoutConfig, error) {
@@ -28,15 +31,17 @@ func LoadCheckout() (CheckoutConfig, error) {
 		GatewayTarget:   env("GATEWAY_TARGET", "localhost:8081"),
 		GatewayTLS:      envBool("GATEWAY_TLS", false),
 		OrderTTL:        envDur("ORDER_TTL", 15*time.Minute),
-		UserJWTSecret:   os.Getenv("USER_JWT_SECRET"),
+		UserJWTSecrets:  splitCSV(env("USER_JWT_SECRETS", os.Getenv("USER_JWT_SECRET"))), // plural var falls back to the old singular — rotation-ready, upgrade-safe
+		UserJWTIssuer:   os.Getenv("USER_JWT_ISS"),
+		UserJWTAudience: os.Getenv("USER_JWT_AUD"),
 		RateLimitPerMin: envInt("RATE_LIMIT_PER_MIN", 120),
 	}
 
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("DATABASE_URL is required")
 	}
-	if c.UserJWTSecret == "" {
-		return c, fmt.Errorf("USER_JWT_SECRET is required")
+	if len(c.UserJWTSecrets) == 0 {
+		return c, fmt.Errorf("USER_JWT_SECRETS is required")
 	}
 	return c, nil
 }
@@ -113,10 +118,10 @@ type Cashfree struct {
 }
 
 type PayPal struct {
-	ClientID      string
-	Secret        string
+	ClientID  string
+	Secret    string
 	WebhookID string
-	BaseURL       string
+	BaseURL   string
 }
 
 func LoadGateway() (GatewayConfig, error) {
@@ -150,4 +155,15 @@ func LoadGateway() (GatewayConfig, error) {
 			BaseURL:   os.Getenv("PAYPAL_BASE_URL"),
 		},
 	}, nil
+}
+
+func splitCSV(v string) []string {
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
