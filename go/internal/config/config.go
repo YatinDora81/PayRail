@@ -19,7 +19,7 @@ type CheckoutConfig struct {
 	UserJWTSecrets  []string // HS256 secrets, comma-separated; [0] is current, the rest exist for rotation
 	UserJWTIssuer   string   // required `iss` when set (pins the auth service)
 	UserJWTAudience string   // required `aud` when set (pins THIS service)
-	RateLimitPerMin int      // per user+ip request budget on /v1 (0 disables)
+	RateLimitPerMin int
 }
 
 func LoadCheckout() (CheckoutConfig, error) {

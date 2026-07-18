@@ -30,6 +30,7 @@ func NewRouter(h *Handler, db, rdb Pingable, jwtCfg middleware.UserJWTConfig, al
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	
 	mux.HandleFunc("GET /readyz", readiness(db, rdb))
 
 	protected := middleware.Chain(api,

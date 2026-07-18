@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -72,8 +71,6 @@ func run(logger *slog.Logger) error {
 
 	svc := checkout.NewService(db, bg, gw, cfg.OrderTTL, logger)
 	handler := checkout.NewHandler(svc, logger)
-
-	fmt.Println(handler)
 
 	srv := &http.Server{
 		Addr:    cfg.Addr,

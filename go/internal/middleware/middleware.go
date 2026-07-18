@@ -21,7 +21,7 @@ type AllowFunc func(ctx context.Context, key string) bool
 type ctxKey int
 
 const (
-	reqIDKey = iota
+	reqIDKey ctxKey = iota
 	userIDKey
 )
 

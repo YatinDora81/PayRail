@@ -27,7 +27,7 @@ func NewClient(target string, tlsEnabled bool, logger *slog.Logger) (*Client, er
 
 	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(creds), grpc.WithStatsHandler(otelgrpc.NewClientHandler()))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("dial gateway %q: %w", target, err)
 	}
 
 	return &Client{conn: conn, rpc: gatewaypb.NewGatewayServiceClient(conn), logger: logger}, nil

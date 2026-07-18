@@ -29,14 +29,6 @@ func NewService(db *store.Store, b *budget.Gate, gw *gatewayclient.Client, ttl t
 	return &Service{db: db, budget: b, gateway: gw, orderTTL: ttl, logger: logger}
 }
 
-func (s *Service) ListPlans(ctx context.Context, country string) ([]store.PlanForList, error) {
-	return s.db.ListPlans(ctx, country)
-}
-
-func (s *Service) BankOffers(ctx context.Context, country string) ([]store.BankOfferForList, error) {
-	return s.db.ListBankOffers(ctx, country)
-}
-
 type CreateOrderInput struct {
 	UserID         string
 	IdempotencyKey string
@@ -55,6 +47,14 @@ type CreateResult struct {
 	GatewayOrderID string
 	ClientParams   map[string]any
 	Replayed       bool
+}
+
+func (s *Service) ListPlans(ctx context.Context, country string) ([]store.PlanForList, error) {
+	return s.db.ListPlans(ctx, country)
+}
+
+func (s *Service) BankOffers(ctx context.Context, country string) ([]store.BankOfferForList, error) {
+	return s.db.ListBankOffers(ctx, country)
 }
 
 type Quote struct {
@@ -536,4 +536,3 @@ func (s *Service) Credits(ctx context.Context, userID, cursor string, limit int)
 	}
 	return s.db.CreditsForUser(ctx, userID, cursor, limit)
 }
-
