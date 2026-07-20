@@ -167,3 +167,27 @@ func splitCSV(v string) []string {
 	}
 	return out
 }
+
+type WebhookConfig struct {
+	Addr          string
+	DatabaseURL   string
+	GatewayTarget string
+	GatewayTLS    bool
+	Env           string
+}
+
+func LoadWebhook() (WebhookConfig, error) {
+	c := WebhookConfig{
+		Addr:          env("PORT", ":8082"),
+		DatabaseURL:   os.Getenv("DATABASE_URL"),
+		GatewayTarget: env("GATEWAY_TARGET", "localhost:8081"),
+		GatewayTLS:    envBool("GATEWAY_TLS", false),
+		Env:           env("ENV", "development"),
+	}
+
+	if c.DatabaseURL == "" {
+		return c, fmt.Errorf("DATABASE_URL is required")
+	}
+
+	return c, nil
+}
