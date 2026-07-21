@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log/slog"
+	"net/http"
 
 	"github.com/payrail/go/internal/gatewaypb"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -75,4 +76,25 @@ func paramsToAny(in map[string]string) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+func (c *Client)VerifyWebhook(ctx context.Context,provider string , body []byte , headers http.Header)(bool , error){
+	resp , err := c.rpc.VerifyWebhook(ctx , &gatewaypb.VerifyWebhookRequest{
+		Gateway: gatewaypb.GatewayFromName(provider),
+		Body: body,
+		Headers: flattenHeaders(headers),
+	})
+
+	if err != nil{
+		return false, fmt.Errorf("gateway VerifyWebhook: %w", err)
+	}
+	return resp.GetVerified() , nil
+}
+
+func flattenHeaders(h http.Header) map[string]string {
+	m := make(map[string]string, len(h))
+	for k := range h {
+		m[k] = h.Get(k) // first value is enough for signature headers
+	}
+	return m
 }
