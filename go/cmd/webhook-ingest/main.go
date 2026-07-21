@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -52,13 +55,29 @@ func run(logger *slog.Logger) error {
 
 	defer gw.Close()
 
-	handler := webhookingest.NewHandler(gw, webhookingest.NewStore(pool) , logger)
+	handler := webhookingest.NewHandler(gw, webhookingest.NewStore(pool), logger)
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler: otelhttp.NewHandler(webhookingest.NewHandler()),
+		Handler:           otelhttp.NewHandler(webhookingest.NewRouter(handler, logger), "webhook-ingest"),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	return nil
+	go func() {
+		logger.Info("webhook-ingest listening", "addr", cfg.Addr, "env", cfg.Env)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("server error", "err", err)
+			os.Exit(1)
+		}
+	}()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	<-stop
+	logger.Info("shutting down")
+
+	shutdownCtx , cancel := context.WithTimeout(context.Background() , 10 * time.Second)
+	defer cancel()
+
+	return srv.Shutdown(shutdownCtx)
 }
