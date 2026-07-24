@@ -36,7 +36,10 @@ func run(logger *slog.Logger) error {
 
 	ctx := context.Background()
 	shutdown, err := telemetry.Init(ctx, "webhook-ingest")
-
+	if err != nil {
+		return err
+	}
+	
 	defer func() {
 		_ = shutdown(context.Background())
 	}()
@@ -76,7 +79,7 @@ func run(logger *slog.Logger) error {
 	<-stop
 	logger.Info("shutting down")
 
-	shutdownCtx , cancel := context.WithTimeout(context.Background() , 10 * time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	return srv.Shutdown(shutdownCtx)
