@@ -36,7 +36,7 @@ func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
-func NewRouter(h *Handler , logger *slog.Logger)http.Handler{
+func NewRouter(h *Handler, logger *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -44,7 +44,25 @@ func NewRouter(h *Handler , logger *slog.Logger)http.Handler{
 		_, _ = w.Write([]byte("ok"))
 	})
 
-
 	
+
 	return mux
+}
+
+func (h *Handler)Receive(w http.ResponseWriter, r *http.Request){
+
+}
+
+func capConcurrency(n int, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		slots := make(chan struct{}, n)
+		select {
+		case slots <- struct{}{}:
+			defer func() { <-slots }()
+			next.ServeHTTP(w, r)
+		default:
+			w.Header().Set("Retry-After", "2")
+			http.Error(w, "busy", http.StatusTooManyRequests)
+		}
+	})
 }
