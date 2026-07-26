@@ -191,3 +191,36 @@ func LoadWebhook() (WebhookConfig, error) {
 
 	return c, nil
 }
+
+type SettlementConfig struct {
+	Brokers     []string
+	DatabaseURL string
+	GroupID     string
+	Env         string
+}
+
+func LoadSettlement() (SettlementConfig, error) {
+	c := SettlementConfig{
+		Brokers:     brokers("KAFKA_BROKERS", "localhost:9092"),
+		DatabaseURL: os.Getenv("DATABASE_URL"),
+		GroupID:     env("GROUP_ID", "settlement-worker"),
+		Env:         env("ENV", "development"),
+	}
+	if c.DatabaseURL == "" {
+		return c, fmt.Errorf("DATABASE_URL is required")
+	}
+	return c, nil
+}
+
+
+func brokers(key, def string) []string {
+	v := env(key, def)
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
