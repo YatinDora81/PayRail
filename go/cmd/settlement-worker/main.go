@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -68,5 +67,7 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	return nil
+	logger.Info("settlement-worker consuming", "topic", events.TopicPaymentEvents, "group", cfg.GroupID, "env", cfg.Env)
+
+	return reader.Run(ctx, logger, svc.Handle)
 }
