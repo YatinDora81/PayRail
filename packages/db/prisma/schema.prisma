@@ -61,7 +61,7 @@ enum PaymentStatus {
 enum RefundStatus {
   PENDING
   PROCESSING
-  SUCCEEDED
+  PROCESSED
   FAILED
 }
 
@@ -74,12 +74,11 @@ enum ReservationStatus {
 
 /// Eligibility rule kinds; params live in `config` (Json) so new kinds need no migration.
 enum RuleType {
-  MIN_ORDER_AMOUNT //  { amountMinor, currency }
-  FIRST_PURCHASE
-  PLAN_IN //           { planIds }
-  USER_SEGMENT //      { segment }
-  DATE_WINDOW //       { startsAt, endsAt }
-  MAX_USES_GLOBAL //   { count }
+  MIN_AMOUNT_MINOR //    { currency, amountMinor } — constrains ONLY its own currency
+  PLAN_IN //             { planIds }
+  FIRST_PURCHASE_ONLY
+  COUNTRY_IN
+  USER_SEGMENT
 }
 
 /// Exactly one value column set per type.
@@ -124,25 +123,25 @@ enum WebhookStatus {
 }
 
 enum EmailStatus {
-  QUEUED
+  PENDING
   SENT
   FAILED
 }
 
 /// Chargeback lifecycle; LOST/ACCEPTED claws credits back via the ledger.
 enum DisputeStatus {
-  OPEN
+  NEEDS_RESPONSE
   UNDER_REVIEW
   WON
   LOST
-  ACCEPTED
-  CANCELLED
+  ACCEPTED // merchant conceded — claws back exactly like LOST
 }
 
 enum InvoiceStatus {
-  DRAFT
   ISSUED
-  CANCELLED
+  PAID
+  VOID
+  REFUNDED
 }
 
 /// Admin RBAC.
@@ -152,13 +151,6 @@ enum AdminRole {
   FINANCE //              refunds, payouts, invoices
   SUPPORT //              read + limited actions
   READONLY
-}
-
-enum DeadLetterSource {
-  ORDER_INTENT
-  SETTLEMENT
-  EMAIL
-  RECONCILE
 }
 
 /// Claim-first idempotency (hardening §4): a winner claims IN_PROGRESS, finishes
@@ -184,23 +176,19 @@ enum BankOfferFunding {
   SHARED
 }
 
-/// Instrument classes a bank offer targets (gateway resolves the BIN; we never see the PAN).
-enum InstrumentType {
-  CREDIT_CARD
-  DEBIT_CARD
-  CREDIT_EMI
-  DEBIT_EMI
-  NET_BANKING
-  UPI
-  WALLET
-}
 
 enum CardNetwork {
   VISA
   MASTERCARD
-  RUPAY
   AMEX
-  DINERS
+  RUPAY
+  DISCOVER
+}
+
+enum CardType {
+  CREDIT
+  DEBIT
+  PREPAID
 }
 
 // ============================================================================
@@ -215,8 +203,11 @@ model User {
   phone     String?  @unique
   creditsBalance Int  @default(0) // cache of ledger SUM; update in the same txn
 
+  isLocked       Boolean @default(false) // [ADDED] §6 lockout — checkout refuses 403 BEFORE the idempotency claim
+  lockedReason   String? // [ADDED] e.g. CHARGEBACK_NEGATIVE_BALANCE
+
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
 
   orders        Order[]
   creditsLedger CreditsLedger[]
@@ -225,7 +216,7 @@ model User {
 }
 
 /// Credit packs (one-time purchases), not subscriptions.
-model Plans {
+model Plan {
   id          String  @id @default(cuid())
   name        String
   description String?
@@ -235,10 +226,12 @@ model Plans {
   sacCode     String? //              GST SAC/HSN code
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
 
   prices  PlanPrice[]
   orders  Order[]
+
+  @@map("Plans")
 }
 
 /// Geo pricing. city="" = country default (sentinel; dodges the NULL-uniqueness
@@ -246,7 +239,7 @@ model Plans {
 model PlanPrice {
   id       String   @id @default(cuid())
   planId   String
-  plan     Plans    @relation(fields: [planId], references: [id])
+  plan     Plan    @relation(fields: [planId], references: [id])
   country  String //                 ISO code, e.g. "IN", "US"
   city     String   @default("") //   "" = country default (sentinel)
   currency Currency
@@ -254,10 +247,18 @@ model PlanPrice {
   isActive Boolean  @default(true)
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
 
   @@unique([planId, country, city])
   @@index([planId, country])
+  @@index([country, city, isActive])
+}
+
+/// [ADDED] Currencies the platform accepts — DB-toggled, no deploy. admin-api
+/// validates every budget / price currency against the enabled set.
+model SupportedCurrency {
+  code    Currency @id
+  enabled Boolean  @default(true)
 }
 
 // ============================================================================
@@ -270,13 +271,13 @@ model Promotions {
   name        String
   description String?
   stackingMode StackingMode @default(EXCLUSIVE)
-  priority    Int          @default(0) // tie-break when several are eligible
-  startsAt    DateTime
-  endsAt      DateTime
-  isActive    Boolean      @default(true)
+  priority    Int          @default(0)
+  isActive     Boolean      @default(false)
+  startsAt     DateTime     @db.Timestamptz(3)
+  endsAt       DateTime     @db.Timestamptz(3)
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
 
   rules   PromotionRules[]
   effects PromotionEffects[]
@@ -315,27 +316,29 @@ model PromotionEffects {
 
   createdAt DateTime @default(now())
 
-  @@index([promotionId])
+  @@index([promotionId, currency])
 }
 
 /// Coupon codes under a promotion; redeemedCount is a cache (PromotionUsage is truth).
 model CouponCode {
   id             String     @id @default(cuid())
-  promotionId    String
-  promotion      Promotions @relation(fields: [promotionId], references: [id])
+  promotionId    String?
+  promotion      Promotions? @relation(fields: [promotionId], references: [id])
   code           String     @unique
-  maxRedemptions Int? //          null = unlimited (global cap)
-  redeemedCount  Int        @default(0) // cache; update under the lock
+  maxRedemptions Int?
   perUserLimit   Int        @default(1)
+  startsAt       DateTime?   @db.Timestamptz(3)
+  endsAt         DateTime?   @db.Timestamptz(3)
   isActive       Boolean    @default(true)
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
 
   usages  PromotionUsage[]
   applied OrderDiscount[]
 
   @@index([promotionId])
+  @@index([promotionId, isActive, createdAt])
 }
 
 /// Who used which promo/coupon + reservation state. perUserLimit enforced by
@@ -348,15 +351,15 @@ model PromotionUsage {
   coupon      CouponCode?       @relation(fields: [couponId], references: [id])
   userId      String
   user        User              @relation(fields: [userId], references: [id])
-  orderId     String?
-  order       Order?            @relation(fields: [orderId], references: [id])
+  orderId     String
+  order       Order            @relation(fields: [orderId], references: [id])
   status      ReservationStatus @default(RESERVED)
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 
+  @@unique([promotionId, userId, orderId])
+  @@index([promotionId, userId, status])
   @@index([couponId, userId])
-  @@index([promotionId, userId])
   @@index([orderId])
 }
 
@@ -368,10 +371,9 @@ model PromotionBudget {
   promotion   Promotions @relation(fields: [promotionId], references: [id])
   currency    Currency
   capMinor    BigInt //              the ceiling in this currency
-  spentMinorCached BigInt @default(0) // cache of SUM(PromotionSpend)
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
 
   @@unique([promotionId, currency])
 }
@@ -385,13 +387,13 @@ model PromotionSpend {
   currency    Currency
   amountMinor BigInt //              SIGNED: + reserve/consume, - release
   status      ReservationStatus
-  orderId     String?
-  order       Order?            @relation(fields: [orderId], references: [id])
+  orderId     String
+  order       Order            @relation(fields: [orderId], references: [id])
 
   createdAt DateTime @default(now())
 
   @@index([promotionId, currency])
-  @@index([orderId])
+  @@index([orderId, status])
 }
 
 /// Frozen snapshot of every promo/coupon that landed on an order (stacking = many
@@ -428,7 +430,7 @@ model Order {
   userId         String
   user           User        @relation(fields: [userId], references: [id])
   planId         String
-  plan           Plans       @relation(fields: [planId], references: [id])
+  plan           Plan       @relation(fields: [planId], references: [id])
   status         OrderStatus @default(CREATED)
 
   currency Currency //                       derived from PlanPrice
@@ -446,11 +448,11 @@ model Order {
 
   traceId String? //                         distributed tracing
 
-  expiresAt DateTime //                      sweeper kills CREATED past this
+  expiresAt DateTime  @db.Timestamptz(3) // swept on now()
   paidAt    DateTime?
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
 
   payments Payment[]
   refunds  Refund[]
@@ -463,7 +465,7 @@ model Order {
 
   @@unique([userId, idempotencyKey]) // idempotency per user
   @@unique([gateway, gatewayOrderId]) // gateway id unique per provider (NULLs stay distinct)
-  @@index([status, expiresAt]) //          abandoned-order sweep
+  @@index([status, updatedAt]) //          abandoned-order sweep
   @@index([userId])
 }
 
@@ -485,7 +487,7 @@ model Payment {
   traceId         String?
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
 
   refunds  Refund[]
   disputes Dispute[]
@@ -509,32 +511,36 @@ model Refund {
   idempotencyKey String       @unique
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
 
   @@index([paymentId])
   @@index([orderId])
+  @@index([status, createdAt])
+  @@index([orderId, status])
 }
 
 /// Chargeback — lands AFTER PAID (credits already granted), so LOST/ACCEPTED
 /// claws credits back via a CreditsLedger row (CHARGEBACK / DISPUTE).
 model Dispute {
   id              String        @id @default(cuid())
-  paymentId       String
-  payment         Payment       @relation(fields: [paymentId], references: [id])
+  paymentId       String?
+  payment         Payment?       @relation(fields: [paymentId], references: [id])
   orderId         String
   order           Order         @relation(fields: [orderId], references: [id])
   gateway         Gateway
-  gatewayDisputeId String?      @unique
-  status          DisputeStatus @default(OPEN)
+  gatewayDisputeId String      @unique
+  status          DisputeStatus @default(NEEDS_RESPONSE)
   reasonCode      String? //                provider reason code
   amountMinor     BigInt
-  currency        Currency
+  currency        Currency?
+  evidence        Json? //                  PATCH /disputes/:id/evidence persists it
+  note            String?
   evidenceDueBy   DateTime? //              deadline to submit evidence
   openedAt        DateTime      @default(now())
   resolvedAt      DateTime?
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
 
   @@index([orderId])
   @@index([paymentId])
@@ -549,43 +555,35 @@ model Dispute {
 /// pay time. Usually BANK-funded; the GATEWAY validates the BIN + applies it (we
 /// never see the PAN). One offer = one country = one currency.
 model BankOffer {
-  id          String           @id @default(cuid())
-  name        String //                       "10% off on HDFC Credit Cards"
-  description String?
-  type        BankOfferType //                INSTANT changes the charge; CASHBACK doesn't
-  funding     BankOfferFunding @default(BANK)
-
-  bankCode    String? //                       null = any bank
-  instruments InstrumentType[] //              empty = any method
-  networks    CardNetwork[] //                 empty = any network
-
-  country  String //                           ISO market
-
+  id               String       @id @default(cuid())
+  bankName         String       @map("bank") 
+  cardNetwork      CardNetwork? @map("network") 
+  binRangeId       String? 
+  binRange         BinRange?    @relation(fields: [binRangeId], references: [id])
+  description      String?
+  discountBps      Int 
+  maxDiscountMinor BigInt? 
+  minAmountMinor   BigInt       @default(0)
   currency         Currency
-  percentBps       Int? //                      currency-agnostic
-  flatAmountMinor  BigInt? //                   in `currency`
-  maxDiscountMinor BigInt? //                   cap on discount (% offers)
-  minOrderMinor    BigInt? //                   min txn to qualify
+  country          String       @default("") 
 
-  maxRedemptions   Int? //                      null = unlimited
-  perUserLimit     Int?    @default(1) //       our fallback; per-card is gateway-side
-  budgetCapMinor   BigInt? //                   merchant-funded ceiling
-  spentMinorCached BigInt  @default(0) //       merchant-funded only
+  type           BankOfferType    @default(INSTANT_DISCOUNT)
+  funding        BankOfferFunding @default(BANK) 
+  budgetCapMinor BigInt? 
+  gateway        Gateway? 
+  gatewayOfferId String?          @unique 
 
-  gateway        Gateway?
-  gatewayOfferId String?  @unique //            Razorpay offer_id / Stripe coupon id
-
-  startsAt DateTime
-  endsAt   DateTime
+  startsAt DateTime @db.Timestamptz(3)
+  endsAt   DateTime @db.Timestamptz(3)
   isActive Boolean  @default(true)
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
 
   appliedTo OrderBankOffer[]
 
   @@index([country, isActive, startsAt, endsAt])
-  @@index([bankCode])
+  @@index([bankName])
 }
 
 /// Bank offer applied to an order (RESERVED -> CONSUMED/RELEASED). discountMinor =
@@ -605,9 +603,9 @@ model OrderBankOffer {
   reimbursed     Boolean           @default(false) // bank settlement reconciled?
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
 
-  @@index([orderId])
+  @@index([orderId, bankOfferId])
   @@index([bankOfferId])
   @@index([status])
 }
@@ -615,20 +613,21 @@ model OrderBankOffer {
 /// Issuer BIN ranges (card PREFIX only — not cardholder data). Display + pre-filter
 /// only; the gateway stays authoritative. Match by LONGEST prefix; treat as advisory.
 model BinRange {
-  id        String         @id @default(cuid())
-  binPrefix String         @unique //          6 or 8 digit prefix
-  bankCode  String //                          matches BankOffer.bankCode
-  network   CardNetwork
-  cardType  InstrumentType
-  cardLevel String? //                         "PLATINUM" | "SIGNATURE" | ...
-  country   String         @default("IN")
-  isActive  Boolean        @default(true)
+  id       String      @id @default(cuid())
+  bankName String 
+  network  CardNetwork
+  binLow   String 
+  binHigh  String 
+  cardType CardType? 
+  isActive Boolean     @default(true)
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
 
-  @@index([bankCode])
-  @@index([network, cardType])
+  offers BankOffer[]
+
+  @@index([bankName])
+  @@index([network, binLow, binHigh])
 }
 
 // ============================================================================
@@ -650,7 +649,20 @@ model CreditsLedger {
   createdAt DateTime @default(now())
 
   @@unique([referenceType, referenceId, reason])
-  @@index([userId])
+  @@index([userId,id])
+}
+
+model OutboxEvent {
+  id           String    @id @default(cuid())
+  topic        String 
+  partitionKey String 
+  payload      Json
+  headers      Json? 
+  publishedAt  DateTime? @db.Timestamptz(3) 
+  attempts     Int       @default(0) 
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3) 
+
+  @@index([publishedAt, createdAt]) 
 }
 
 // ============================================================================
@@ -661,26 +673,33 @@ model CreditsLedger {
 /// assign in the settlement txn / a DB sequence. CGST+SGST intra-state, IGST inter-state.
 model Invoice {
   id            String        @id @default(cuid())
-  orderId       String        @unique
+  orderId       String        @unique 
   order         Order         @relation(fields: [orderId], references: [id])
-  series        String        @default("DEFAULT") // reset numbering per FY / entity
-  invoiceNumber Int //                              gapless within series
-  gstin         String?
-  placeOfSupply String? //                          state code -> CGST+SGST vs IGST
-  cgstMinor     BigInt        @default(0)
-  sgstMinor     BigInt        @default(0)
-  igstMinor     BigInt        @default(0)
-  totalTaxMinor BigInt        @default(0)
-  totalMinor    BigInt //                           grand total
+  series        String 
+  number        Int 
   currency      Currency
+  amountMinor   BigInt 
+  taxBps        Int           @default(0) 
+  taxMinor      BigInt        @default(0) 
+  gstin         String? 
+  placeOfSupply String? 
+  cgstMinor     BigInt        @default(0) 
+  sgstMinor     BigInt        @default(0) 
+  igstMinor     BigInt        @default(0) 
   status        InvoiceStatus @default(ISSUED)
-  pdfUrl        String?
+  pdfUrl        String? 
   issuedAt      DateTime      @default(now())
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
 
-  @@unique([series, invoiceNumber]) // gapless per series
+  @@unique([series, number]) 
+  @@index([status, issuedAt])
+}
+
+model InvoiceCounter {
+  series String @id
+  next   Int    @default(1)
 }
 
 // ============================================================================
@@ -698,48 +717,45 @@ model PaymentGatewayConfig {
   config              Json //                  non-secret settings only
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
 }
 
 /// Inbound webhooks. eventId unique (dedup). Verify HMAC on rawBody, store
 /// RECEIVED, ack fast, hand to Kafka, mark PROCESSED in the worker.
 model WebhookEvents {
-  id          String        @id @default(cuid())
-  eventId     String        @unique //         provider event id (idempotency)
-  gateway     Gateway
-  eventType   String
-  status      WebhookStatus @default(RECEIVED)
-  payload     Json //                           parsed payload (convenience)
-  rawBody     String?       @db.Text //         exact signed bytes (re-verify / audit)
-  signature   String?
-  attempts    Int           @default(0)
-  lastError   String?
-  nextRetryAt DateTime?
-  traceId     String?
-  processedAt DateTime?
-
-  createdAt DateTime @default(now())
+  id         String        @id @default(cuid())
+  eventId    String        @unique 
+  gateway    Gateway
+  eventType  String
+  status     WebhookStatus @default(RECEIVED)
+  rawBody    String?       @db.Text 
+  bodySha    String? 
+  signature  String? 
+  payload    Json? 
+  receivedAt DateTime      @default(now()) @db.Timestamptz(3) 
+  purgedAt   DateTime?     @db.Timestamptz(3) 
 
   @@index([status])
   @@index([eventType])
+  @@index([purgedAt, receivedAt])
 }
 
 /// Idempotent email log — the composite unique stops a duplicate send. Drained by
 /// the Kafka email workers.
 model EmailLog {
-  id            String      @id @default(cuid())
-  userId        String?
-  user          User?       @relation(fields: [userId], references: [id])
-  toEmail       String
-  template      String //                       "ORDER_PAID" | "REFUND_DONE" | ...
-  referenceType String
-  referenceId   String
-  status        EmailStatus @default(QUEUED)
-  sentAt        DateTime?
+  id       String      @id @default(cuid())
+  userId   String? //                              [DEAD]
+  user     User?       @relation(fields: [userId], references: [id])
+  to       String      @map("toEmail") 
+  template String //                               "ORDER_PAID" | "REFUND_DONE"
+  refType  String      @map("referenceType") 
+  refId    String      @map("referenceId") 
+  status   EmailStatus @default(PENDING)
+  sentAt   DateTime? 
 
   createdAt DateTime @default(now())
 
-  @@unique([template, referenceType, referenceId])
+  @@unique([template, refType, refId])
   @@index([status])
 }
 
@@ -756,7 +772,7 @@ model AdminUser {
   isActive Boolean   @default(true)
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
 
   auditLogs AdminAuditLog[]
 }
@@ -776,7 +792,7 @@ model AdminAuditLog {
 
   createdAt DateTime @default(now())
 
-  @@index([actorId])
+  @@index([actorId,createdAt])
   @@index([entityType, entityId])
   @@index([createdAt])
 }
@@ -784,15 +800,15 @@ model AdminAuditLog {
 /// Replay cache — same key + user + endpoint returns the stored response.
 /// requestHash guards the same key being reused with a different body.
 model IdempotencyRecord {
-  id             String   @id @default(cuid())
+  id             String            @id @default(cuid())
   idempotencyKey String
-  userId         String? //                      scope per user
+  userId         String 
   endpoint       String //                       "POST /checkout"
-  requestHash    String?
-  responseStatus Int?
-  responseBody   Json? //                         replayed verbatim
-  status         IdempotencyStatus @default(IN_PROGRESS) // claim-first lifecycle
-  expiresAt      DateTime
+  requestHash    String? //                      same key + different body ⇒ 409
+  responseStatus Int? //                         5xx is NEVER stored
+  responseBody   Json? 
+  status         IdempotencyStatus @default(IN_PROGRESS)
+  expiresAt      DateTime          @db.Timestamptz(3)
 
   createdAt DateTime @default(now())
 
@@ -802,34 +818,40 @@ model IdempotencyRecord {
 
 /// Poison-message parking for the async pipelines (retries exhausted — needs a human).
 model DeadLetterEvent {
-  id           String           @id @default(cuid())
-  source       DeadLetterSource
-  partitionKey String? //                        Kafka key (userId / gatewayOrderId)
-  payload      Json
-  error        String?
-  attempts     Int              @default(0)
-  resolvedAt   DateTime?
+  id          String    @id @default(cuid())
+  source      String 
+  topic       String 
+  key         String 
+  payload     Json
+  reason      String 
+  needsReview Boolean   @default(false) 
+  replayedAt  DateTime? 
+  replayedBy  String? 
 
   createdAt DateTime @default(now())
 
-  @@index([source])
-  @@index([resolvedAt])
+  @@index([source, createdAt])
+  @@index([needsReview])
 }
 
 /// Reconciler runs: Redis counter vs SUM(spend), the drift, and whether Redis was
 /// reseeded from the ledger (ledger wins). Alert on large |driftMinor|.
 model ReconciliationLog {
   id               String    @id @default(cuid())
-  promotionId      String? //                    null = a global run
+  kind             String 
+  promotionId      String? 
   currency         Currency?
-  redisRemaining   BigInt?
-  ledgerSpentMinor BigInt?
-  driftMinor       BigInt    @default(0)
-  corrected        Boolean   @default(false)
-  note             String?
+  redisRemaining   BigInt? 
+  ledgerSpentMinor BigInt? 
+  driftMinor       BigInt    @default(0) 
+  corrected        Boolean   @default(false) 
+  deadLetterId     String? 
+  note             String? 
 
   createdAt DateTime @default(now())
 
   @@index([promotionId, currency])
+  @@index([kind, createdAt]) 
+  @@index([deadLetterId]) 
   @@index([createdAt])
 }

@@ -11,13 +11,13 @@ CREATE TYPE "OrderStatus" AS ENUM ('CREATED', 'PENDING_PAYMENT', 'AUTHORIZED', '
 CREATE TYPE "PaymentStatus" AS ENUM ('CREATED', 'PROCESSING', 'REQUIRES_ACTION', 'AUTHORIZED', 'CAPTURED', 'PARTIALLY_CAPTURED', 'FAILED', 'REFUNDED', 'PARTIALLY_REFUNDED', 'CHARGED_BACK');
 
 -- CreateEnum
-CREATE TYPE "RefundStatus" AS ENUM ('PENDING', 'PROCESSING', 'SUCCEEDED', 'FAILED');
+CREATE TYPE "RefundStatus" AS ENUM ('PENDING', 'PROCESSING', 'PROCESSED', 'FAILED');
 
 -- CreateEnum
 CREATE TYPE "ReservationStatus" AS ENUM ('RESERVED', 'CONSUMED', 'RELEASED');
 
 -- CreateEnum
-CREATE TYPE "RuleType" AS ENUM ('MIN_ORDER_AMOUNT', 'FIRST_PURCHASE', 'PLAN_IN', 'USER_SEGMENT', 'DATE_WINDOW', 'MAX_USES_GLOBAL');
+CREATE TYPE "RuleType" AS ENUM ('MIN_AMOUNT_MINOR', 'PLAN_IN', 'FIRST_PURCHASE_ONLY', 'COUNTRY_IN', 'USER_SEGMENT');
 
 -- CreateEnum
 CREATE TYPE "EffectType" AS ENUM ('PERCENT_BPS', 'FLAT_AMOUNT', 'BONUS_CREDITS');
@@ -35,19 +35,19 @@ CREATE TYPE "Gateway" AS ENUM ('RAZORPAY', 'STRIPE', 'CASHFREE', 'PAYPAL');
 CREATE TYPE "WebhookStatus" AS ENUM ('RECEIVED', 'PROCESSED', 'FAILED', 'DEAD_LETTER');
 
 -- CreateEnum
-CREATE TYPE "EmailStatus" AS ENUM ('QUEUED', 'SENT', 'FAILED');
+CREATE TYPE "EmailStatus" AS ENUM ('PENDING', 'SENT', 'FAILED');
 
 -- CreateEnum
-CREATE TYPE "DisputeStatus" AS ENUM ('OPEN', 'UNDER_REVIEW', 'WON', 'LOST', 'ACCEPTED', 'CANCELLED');
+CREATE TYPE "DisputeStatus" AS ENUM ('NEEDS_RESPONSE', 'UNDER_REVIEW', 'WON', 'LOST', 'ACCEPTED');
 
 -- CreateEnum
-CREATE TYPE "InvoiceStatus" AS ENUM ('DRAFT', 'ISSUED', 'CANCELLED');
+CREATE TYPE "InvoiceStatus" AS ENUM ('ISSUED', 'PAID', 'VOID', 'REFUNDED');
 
 -- CreateEnum
 CREATE TYPE "AdminRole" AS ENUM ('OWNER', 'ADMIN', 'FINANCE', 'SUPPORT', 'READONLY');
 
 -- CreateEnum
-CREATE TYPE "DeadLetterSource" AS ENUM ('ORDER_INTENT', 'SETTLEMENT', 'EMAIL', 'RECONCILE');
+CREATE TYPE "IdempotencyStatus" AS ENUM ('IN_PROGRESS', 'DONE', 'FAILED');
 
 -- CreateEnum
 CREATE TYPE "BankOfferType" AS ENUM ('INSTANT_DISCOUNT', 'CASHBACK', 'NO_COST_EMI', 'EMI_DISCOUNT');
@@ -56,10 +56,10 @@ CREATE TYPE "BankOfferType" AS ENUM ('INSTANT_DISCOUNT', 'CASHBACK', 'NO_COST_EM
 CREATE TYPE "BankOfferFunding" AS ENUM ('BANK', 'MERCHANT', 'SHARED');
 
 -- CreateEnum
-CREATE TYPE "InstrumentType" AS ENUM ('CREDIT_CARD', 'DEBIT_CARD', 'CREDIT_EMI', 'DEBIT_EMI', 'NET_BANKING', 'UPI', 'WALLET');
+CREATE TYPE "CardNetwork" AS ENUM ('VISA', 'MASTERCARD', 'AMEX', 'RUPAY', 'DISCOVER');
 
 -- CreateEnum
-CREATE TYPE "CardNetwork" AS ENUM ('VISA', 'MASTERCARD', 'RUPAY', 'AMEX', 'DINERS');
+CREATE TYPE "CardType" AS ENUM ('CREDIT', 'DEBIT', 'PREPAID');
 
 -- CreateTable
 CREATE TABLE "User" (
@@ -68,8 +68,10 @@ CREATE TABLE "User" (
     "name" TEXT,
     "phone" TEXT,
     "creditsBalance" INTEGER NOT NULL DEFAULT 0,
+    "isLocked" BOOLEAN NOT NULL DEFAULT false,
+    "lockedReason" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "User_pkey" PRIMARY KEY ("id")
 );
@@ -84,7 +86,7 @@ CREATE TABLE "Plans" (
     "maxDiscountBps" INTEGER NOT NULL DEFAULT 10000,
     "sacCode" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Plans_pkey" PRIMARY KEY ("id")
 );
@@ -99,9 +101,17 @@ CREATE TABLE "PlanPrice" (
     "amountMinor" BIGINT NOT NULL,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "PlanPrice_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "SupportedCurrency" (
+    "code" "Currency" NOT NULL,
+    "enabled" BOOLEAN NOT NULL DEFAULT true,
+
+    CONSTRAINT "SupportedCurrency_pkey" PRIMARY KEY ("code")
 );
 
 -- CreateTable
@@ -111,11 +121,11 @@ CREATE TABLE "Promotions" (
     "description" TEXT,
     "stackingMode" "StackingMode" NOT NULL DEFAULT 'EXCLUSIVE',
     "priority" INTEGER NOT NULL DEFAULT 0,
-    "startsAt" TIMESTAMP(3) NOT NULL,
-    "endsAt" TIMESTAMP(3) NOT NULL,
-    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "isActive" BOOLEAN NOT NULL DEFAULT false,
+    "startsAt" TIMESTAMPTZ(3) NOT NULL,
+    "endsAt" TIMESTAMPTZ(3) NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Promotions_pkey" PRIMARY KEY ("id")
 );
@@ -148,14 +158,15 @@ CREATE TABLE "PromotionEffects" (
 -- CreateTable
 CREATE TABLE "CouponCode" (
     "id" TEXT NOT NULL,
-    "promotionId" TEXT NOT NULL,
+    "promotionId" TEXT,
     "code" TEXT NOT NULL,
     "maxRedemptions" INTEGER,
-    "redeemedCount" INTEGER NOT NULL DEFAULT 0,
     "perUserLimit" INTEGER NOT NULL DEFAULT 1,
+    "startsAt" TIMESTAMPTZ(3),
+    "endsAt" TIMESTAMPTZ(3),
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "CouponCode_pkey" PRIMARY KEY ("id")
 );
@@ -166,10 +177,9 @@ CREATE TABLE "PromotionUsage" (
     "promotionId" TEXT NOT NULL,
     "couponId" TEXT,
     "userId" TEXT NOT NULL,
-    "orderId" TEXT,
+    "orderId" TEXT NOT NULL,
     "status" "ReservationStatus" NOT NULL DEFAULT 'RESERVED',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "PromotionUsage_pkey" PRIMARY KEY ("id")
 );
@@ -180,9 +190,8 @@ CREATE TABLE "PromotionBudget" (
     "promotionId" TEXT NOT NULL,
     "currency" "Currency" NOT NULL,
     "capMinor" BIGINT NOT NULL,
-    "spentMinorCached" BIGINT NOT NULL DEFAULT 0,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "PromotionBudget_pkey" PRIMARY KEY ("id")
 );
@@ -194,7 +203,7 @@ CREATE TABLE "PromotionSpend" (
     "currency" "Currency" NOT NULL,
     "amountMinor" BIGINT NOT NULL,
     "status" "ReservationStatus" NOT NULL,
-    "orderId" TEXT,
+    "orderId" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "PromotionSpend_pkey" PRIMARY KEY ("id")
@@ -231,10 +240,10 @@ CREATE TABLE "Order" (
     "gateway" "Gateway",
     "gatewayOrderId" TEXT,
     "traceId" TEXT,
-    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "expiresAt" TIMESTAMPTZ(3) NOT NULL,
     "paidAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Order_pkey" PRIMARY KEY ("id")
 );
@@ -255,7 +264,7 @@ CREATE TABLE "Payment" (
     "capturedAt" TIMESTAMP(3),
     "traceId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Payment_pkey" PRIMARY KEY ("id")
 );
@@ -273,7 +282,7 @@ CREATE TABLE "Refund" (
     "reason" TEXT,
     "idempotencyKey" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Refund_pkey" PRIMARY KEY ("id")
 );
@@ -281,19 +290,21 @@ CREATE TABLE "Refund" (
 -- CreateTable
 CREATE TABLE "Dispute" (
     "id" TEXT NOT NULL,
-    "paymentId" TEXT NOT NULL,
+    "paymentId" TEXT,
     "orderId" TEXT NOT NULL,
     "gateway" "Gateway" NOT NULL,
-    "gatewayDisputeId" TEXT,
-    "status" "DisputeStatus" NOT NULL DEFAULT 'OPEN',
+    "gatewayDisputeId" TEXT NOT NULL,
+    "status" "DisputeStatus" NOT NULL DEFAULT 'NEEDS_RESPONSE',
     "reasonCode" TEXT,
     "amountMinor" BIGINT NOT NULL,
-    "currency" "Currency" NOT NULL,
+    "currency" "Currency",
+    "evidence" JSONB,
+    "note" TEXT,
     "evidenceDueBy" TIMESTAMP(3),
     "openedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "resolvedAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Dispute_pkey" PRIMARY KEY ("id")
 );
@@ -301,30 +312,25 @@ CREATE TABLE "Dispute" (
 -- CreateTable
 CREATE TABLE "BankOffer" (
     "id" TEXT NOT NULL,
-    "name" TEXT NOT NULL,
+    "bank" TEXT NOT NULL,
+    "network" "CardNetwork",
+    "binRangeId" TEXT,
     "description" TEXT,
-    "type" "BankOfferType" NOT NULL,
-    "funding" "BankOfferFunding" NOT NULL DEFAULT 'BANK',
-    "bankCode" TEXT,
-    "instruments" "InstrumentType"[],
-    "networks" "CardNetwork"[],
-    "country" TEXT NOT NULL,
-    "currency" "Currency" NOT NULL,
-    "percentBps" INTEGER,
-    "flatAmountMinor" BIGINT,
+    "discountBps" INTEGER NOT NULL,
     "maxDiscountMinor" BIGINT,
-    "minOrderMinor" BIGINT,
-    "maxRedemptions" INTEGER,
-    "perUserLimit" INTEGER DEFAULT 1,
+    "minAmountMinor" BIGINT NOT NULL DEFAULT 0,
+    "currency" "Currency" NOT NULL,
+    "country" TEXT NOT NULL DEFAULT '',
+    "type" "BankOfferType" NOT NULL DEFAULT 'INSTANT_DISCOUNT',
+    "funding" "BankOfferFunding" NOT NULL DEFAULT 'BANK',
     "budgetCapMinor" BIGINT,
-    "spentMinorCached" BIGINT NOT NULL DEFAULT 0,
     "gateway" "Gateway",
     "gatewayOfferId" TEXT,
-    "startsAt" TIMESTAMP(3) NOT NULL,
-    "endsAt" TIMESTAMP(3) NOT NULL,
+    "startsAt" TIMESTAMPTZ(3) NOT NULL,
+    "endsAt" TIMESTAMPTZ(3) NOT NULL,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "BankOffer_pkey" PRIMARY KEY ("id")
 );
@@ -342,7 +348,7 @@ CREATE TABLE "OrderBankOffer" (
     "gatewayOfferId" TEXT,
     "reimbursed" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "OrderBankOffer_pkey" PRIMARY KEY ("id")
 );
@@ -350,15 +356,14 @@ CREATE TABLE "OrderBankOffer" (
 -- CreateTable
 CREATE TABLE "BinRange" (
     "id" TEXT NOT NULL,
-    "binPrefix" TEXT NOT NULL,
-    "bankCode" TEXT NOT NULL,
+    "bankName" TEXT NOT NULL,
     "network" "CardNetwork" NOT NULL,
-    "cardType" "InstrumentType" NOT NULL,
-    "cardLevel" TEXT,
-    "country" TEXT NOT NULL DEFAULT 'IN',
+    "binLow" TEXT NOT NULL,
+    "binHigh" TEXT NOT NULL,
+    "cardType" "CardType",
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "BinRange_pkey" PRIMARY KEY ("id")
 );
@@ -378,26 +383,49 @@ CREATE TABLE "CreditsLedger" (
 );
 
 -- CreateTable
+CREATE TABLE "OutboxEvent" (
+    "id" TEXT NOT NULL,
+    "topic" TEXT NOT NULL,
+    "partitionKey" TEXT NOT NULL,
+    "payload" JSONB NOT NULL,
+    "headers" JSONB,
+    "publishedAt" TIMESTAMPTZ(3),
+    "attempts" INTEGER NOT NULL DEFAULT 0,
+    "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "OutboxEvent_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "Invoice" (
     "id" TEXT NOT NULL,
     "orderId" TEXT NOT NULL,
-    "series" TEXT NOT NULL DEFAULT 'DEFAULT',
-    "invoiceNumber" INTEGER NOT NULL,
+    "series" TEXT NOT NULL,
+    "number" INTEGER NOT NULL,
+    "currency" "Currency" NOT NULL,
+    "amountMinor" BIGINT NOT NULL,
+    "taxBps" INTEGER NOT NULL DEFAULT 0,
+    "taxMinor" BIGINT NOT NULL DEFAULT 0,
     "gstin" TEXT,
     "placeOfSupply" TEXT,
     "cgstMinor" BIGINT NOT NULL DEFAULT 0,
     "sgstMinor" BIGINT NOT NULL DEFAULT 0,
     "igstMinor" BIGINT NOT NULL DEFAULT 0,
-    "totalTaxMinor" BIGINT NOT NULL DEFAULT 0,
-    "totalMinor" BIGINT NOT NULL,
-    "currency" "Currency" NOT NULL,
     "status" "InvoiceStatus" NOT NULL DEFAULT 'ISSUED',
     "pdfUrl" TEXT,
     "issuedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Invoice_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "InvoiceCounter" (
+    "series" TEXT NOT NULL,
+    "next" INTEGER NOT NULL DEFAULT 1,
+
+    CONSTRAINT "InvoiceCounter_pkey" PRIMARY KEY ("series")
 );
 
 -- CreateTable
@@ -409,7 +437,7 @@ CREATE TABLE "PaymentGatewayConfig" (
     "supportedCurrencies" "Currency"[],
     "config" JSONB NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "PaymentGatewayConfig_pkey" PRIMARY KEY ("id")
 );
@@ -421,15 +449,12 @@ CREATE TABLE "WebhookEvents" (
     "gateway" "Gateway" NOT NULL,
     "eventType" TEXT NOT NULL,
     "status" "WebhookStatus" NOT NULL DEFAULT 'RECEIVED',
-    "payload" JSONB NOT NULL,
     "rawBody" TEXT,
+    "bodySha" TEXT,
     "signature" TEXT,
-    "attempts" INTEGER NOT NULL DEFAULT 0,
-    "lastError" TEXT,
-    "nextRetryAt" TIMESTAMP(3),
-    "traceId" TEXT,
-    "processedAt" TIMESTAMP(3),
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "payload" JSONB,
+    "receivedAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "purgedAt" TIMESTAMPTZ(3),
 
     CONSTRAINT "WebhookEvents_pkey" PRIMARY KEY ("id")
 );
@@ -442,7 +467,7 @@ CREATE TABLE "EmailLog" (
     "template" TEXT NOT NULL,
     "referenceType" TEXT NOT NULL,
     "referenceId" TEXT NOT NULL,
-    "status" "EmailStatus" NOT NULL DEFAULT 'QUEUED',
+    "status" "EmailStatus" NOT NULL DEFAULT 'PENDING',
     "sentAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -457,7 +482,7 @@ CREATE TABLE "AdminUser" (
     "role" "AdminRole" NOT NULL DEFAULT 'READONLY',
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "AdminUser_pkey" PRIMARY KEY ("id")
 );
@@ -482,12 +507,13 @@ CREATE TABLE "AdminAuditLog" (
 CREATE TABLE "IdempotencyRecord" (
     "id" TEXT NOT NULL,
     "idempotencyKey" TEXT NOT NULL,
-    "userId" TEXT,
+    "userId" TEXT NOT NULL,
     "endpoint" TEXT NOT NULL,
     "requestHash" TEXT,
     "responseStatus" INTEGER,
     "responseBody" JSONB,
-    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "status" "IdempotencyStatus" NOT NULL DEFAULT 'IN_PROGRESS',
+    "expiresAt" TIMESTAMPTZ(3) NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "IdempotencyRecord_pkey" PRIMARY KEY ("id")
@@ -496,12 +522,14 @@ CREATE TABLE "IdempotencyRecord" (
 -- CreateTable
 CREATE TABLE "DeadLetterEvent" (
     "id" TEXT NOT NULL,
-    "source" "DeadLetterSource" NOT NULL,
-    "partitionKey" TEXT,
+    "source" TEXT NOT NULL,
+    "topic" TEXT NOT NULL,
+    "key" TEXT NOT NULL,
     "payload" JSONB NOT NULL,
-    "error" TEXT,
-    "attempts" INTEGER NOT NULL DEFAULT 0,
-    "resolvedAt" TIMESTAMP(3),
+    "reason" TEXT NOT NULL,
+    "needsReview" BOOLEAN NOT NULL DEFAULT false,
+    "replayedAt" TIMESTAMP(3),
+    "replayedBy" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "DeadLetterEvent_pkey" PRIMARY KEY ("id")
@@ -510,12 +538,14 @@ CREATE TABLE "DeadLetterEvent" (
 -- CreateTable
 CREATE TABLE "ReconciliationLog" (
     "id" TEXT NOT NULL,
+    "kind" TEXT NOT NULL,
     "promotionId" TEXT,
     "currency" "Currency",
     "redisRemaining" BIGINT,
     "ledgerSpentMinor" BIGINT,
     "driftMinor" BIGINT NOT NULL DEFAULT 0,
     "corrected" BOOLEAN NOT NULL DEFAULT false,
+    "deadLetterId" TEXT,
     "note" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -532,6 +562,9 @@ CREATE UNIQUE INDEX "User_phone_key" ON "User"("phone");
 CREATE INDEX "PlanPrice_planId_country_idx" ON "PlanPrice"("planId", "country");
 
 -- CreateIndex
+CREATE INDEX "PlanPrice_country_city_isActive_idx" ON "PlanPrice"("country", "city", "isActive");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "PlanPrice_planId_country_city_key" ON "PlanPrice"("planId", "country", "city");
 
 -- CreateIndex
@@ -541,7 +574,7 @@ CREATE INDEX "Promotions_isActive_startsAt_endsAt_idx" ON "Promotions"("isActive
 CREATE INDEX "PromotionRules_promotionId_idx" ON "PromotionRules"("promotionId");
 
 -- CreateIndex
-CREATE INDEX "PromotionEffects_promotionId_idx" ON "PromotionEffects"("promotionId");
+CREATE INDEX "PromotionEffects_promotionId_currency_idx" ON "PromotionEffects"("promotionId", "currency");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "CouponCode_code_key" ON "CouponCode"("code");
@@ -550,13 +583,19 @@ CREATE UNIQUE INDEX "CouponCode_code_key" ON "CouponCode"("code");
 CREATE INDEX "CouponCode_promotionId_idx" ON "CouponCode"("promotionId");
 
 -- CreateIndex
+CREATE INDEX "CouponCode_promotionId_isActive_createdAt_idx" ON "CouponCode"("promotionId", "isActive", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "PromotionUsage_promotionId_userId_status_idx" ON "PromotionUsage"("promotionId", "userId", "status");
+
+-- CreateIndex
 CREATE INDEX "PromotionUsage_couponId_userId_idx" ON "PromotionUsage"("couponId", "userId");
 
 -- CreateIndex
-CREATE INDEX "PromotionUsage_promotionId_userId_idx" ON "PromotionUsage"("promotionId", "userId");
+CREATE INDEX "PromotionUsage_orderId_idx" ON "PromotionUsage"("orderId");
 
 -- CreateIndex
-CREATE INDEX "PromotionUsage_orderId_idx" ON "PromotionUsage"("orderId");
+CREATE UNIQUE INDEX "PromotionUsage_promotionId_userId_orderId_key" ON "PromotionUsage"("promotionId", "userId", "orderId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "PromotionBudget_promotionId_currency_key" ON "PromotionBudget"("promotionId", "currency");
@@ -565,7 +604,7 @@ CREATE UNIQUE INDEX "PromotionBudget_promotionId_currency_key" ON "PromotionBudg
 CREATE INDEX "PromotionSpend_promotionId_currency_idx" ON "PromotionSpend"("promotionId", "currency");
 
 -- CreateIndex
-CREATE INDEX "PromotionSpend_orderId_idx" ON "PromotionSpend"("orderId");
+CREATE INDEX "PromotionSpend_orderId_status_idx" ON "PromotionSpend"("orderId", "status");
 
 -- CreateIndex
 CREATE INDEX "OrderDiscount_orderId_idx" ON "OrderDiscount"("orderId");
@@ -577,7 +616,7 @@ CREATE INDEX "OrderDiscount_promotionId_idx" ON "OrderDiscount"("promotionId");
 CREATE UNIQUE INDEX "OrderDiscount_orderId_promotionId_key" ON "OrderDiscount"("orderId", "promotionId");
 
 -- CreateIndex
-CREATE INDEX "Order_status_expiresAt_idx" ON "Order"("status", "expiresAt");
+CREATE INDEX "Order_status_updatedAt_idx" ON "Order"("status", "updatedAt");
 
 -- CreateIndex
 CREATE INDEX "Order_userId_idx" ON "Order"("userId");
@@ -607,6 +646,12 @@ CREATE INDEX "Refund_paymentId_idx" ON "Refund"("paymentId");
 CREATE INDEX "Refund_orderId_idx" ON "Refund"("orderId");
 
 -- CreateIndex
+CREATE INDEX "Refund_status_createdAt_idx" ON "Refund"("status", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "Refund_orderId_status_idx" ON "Refund"("orderId", "status");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Dispute_gatewayDisputeId_key" ON "Dispute"("gatewayDisputeId");
 
 -- CreateIndex
@@ -625,10 +670,10 @@ CREATE UNIQUE INDEX "BankOffer_gatewayOfferId_key" ON "BankOffer"("gatewayOfferI
 CREATE INDEX "BankOffer_country_isActive_startsAt_endsAt_idx" ON "BankOffer"("country", "isActive", "startsAt", "endsAt");
 
 -- CreateIndex
-CREATE INDEX "BankOffer_bankCode_idx" ON "BankOffer"("bankCode");
+CREATE INDEX "BankOffer_bank_idx" ON "BankOffer"("bank");
 
 -- CreateIndex
-CREATE INDEX "OrderBankOffer_orderId_idx" ON "OrderBankOffer"("orderId");
+CREATE INDEX "OrderBankOffer_orderId_bankOfferId_idx" ON "OrderBankOffer"("orderId", "bankOfferId");
 
 -- CreateIndex
 CREATE INDEX "OrderBankOffer_bankOfferId_idx" ON "OrderBankOffer"("bankOfferId");
@@ -637,25 +682,28 @@ CREATE INDEX "OrderBankOffer_bankOfferId_idx" ON "OrderBankOffer"("bankOfferId")
 CREATE INDEX "OrderBankOffer_status_idx" ON "OrderBankOffer"("status");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "BinRange_binPrefix_key" ON "BinRange"("binPrefix");
+CREATE INDEX "BinRange_bankName_idx" ON "BinRange"("bankName");
 
 -- CreateIndex
-CREATE INDEX "BinRange_bankCode_idx" ON "BinRange"("bankCode");
+CREATE INDEX "BinRange_network_binLow_binHigh_idx" ON "BinRange"("network", "binLow", "binHigh");
 
 -- CreateIndex
-CREATE INDEX "BinRange_network_cardType_idx" ON "BinRange"("network", "cardType");
-
--- CreateIndex
-CREATE INDEX "CreditsLedger_userId_idx" ON "CreditsLedger"("userId");
+CREATE INDEX "CreditsLedger_userId_id_idx" ON "CreditsLedger"("userId", "id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "CreditsLedger_referenceType_referenceId_reason_key" ON "CreditsLedger"("referenceType", "referenceId", "reason");
 
 -- CreateIndex
+CREATE INDEX "OutboxEvent_publishedAt_createdAt_idx" ON "OutboxEvent"("publishedAt", "createdAt");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Invoice_orderId_key" ON "Invoice"("orderId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Invoice_series_invoiceNumber_key" ON "Invoice"("series", "invoiceNumber");
+CREATE INDEX "Invoice_status_issuedAt_idx" ON "Invoice"("status", "issuedAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Invoice_series_number_key" ON "Invoice"("series", "number");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "PaymentGatewayConfig_gateway_key" ON "PaymentGatewayConfig"("gateway");
@@ -670,6 +718,9 @@ CREATE INDEX "WebhookEvents_status_idx" ON "WebhookEvents"("status");
 CREATE INDEX "WebhookEvents_eventType_idx" ON "WebhookEvents"("eventType");
 
 -- CreateIndex
+CREATE INDEX "WebhookEvents_purgedAt_receivedAt_idx" ON "WebhookEvents"("purgedAt", "receivedAt");
+
+-- CreateIndex
 CREATE INDEX "EmailLog_status_idx" ON "EmailLog"("status");
 
 -- CreateIndex
@@ -679,7 +730,7 @@ CREATE UNIQUE INDEX "EmailLog_template_referenceType_referenceId_key" ON "EmailL
 CREATE UNIQUE INDEX "AdminUser_email_key" ON "AdminUser"("email");
 
 -- CreateIndex
-CREATE INDEX "AdminAuditLog_actorId_idx" ON "AdminAuditLog"("actorId");
+CREATE INDEX "AdminAuditLog_actorId_createdAt_idx" ON "AdminAuditLog"("actorId", "createdAt");
 
 -- CreateIndex
 CREATE INDEX "AdminAuditLog_entityType_entityId_idx" ON "AdminAuditLog"("entityType", "entityId");
@@ -694,13 +745,19 @@ CREATE INDEX "IdempotencyRecord_expiresAt_idx" ON "IdempotencyRecord"("expiresAt
 CREATE UNIQUE INDEX "IdempotencyRecord_userId_endpoint_idempotencyKey_key" ON "IdempotencyRecord"("userId", "endpoint", "idempotencyKey");
 
 -- CreateIndex
-CREATE INDEX "DeadLetterEvent_source_idx" ON "DeadLetterEvent"("source");
+CREATE INDEX "DeadLetterEvent_source_createdAt_idx" ON "DeadLetterEvent"("source", "createdAt");
 
 -- CreateIndex
-CREATE INDEX "DeadLetterEvent_resolvedAt_idx" ON "DeadLetterEvent"("resolvedAt");
+CREATE INDEX "DeadLetterEvent_needsReview_idx" ON "DeadLetterEvent"("needsReview");
 
 -- CreateIndex
 CREATE INDEX "ReconciliationLog_promotionId_currency_idx" ON "ReconciliationLog"("promotionId", "currency");
+
+-- CreateIndex
+CREATE INDEX "ReconciliationLog_kind_createdAt_idx" ON "ReconciliationLog"("kind", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "ReconciliationLog_deadLetterId_idx" ON "ReconciliationLog"("deadLetterId");
 
 -- CreateIndex
 CREATE INDEX "ReconciliationLog_createdAt_idx" ON "ReconciliationLog"("createdAt");
@@ -715,7 +772,7 @@ ALTER TABLE "PromotionRules" ADD CONSTRAINT "PromotionRules_promotionId_fkey" FO
 ALTER TABLE "PromotionEffects" ADD CONSTRAINT "PromotionEffects_promotionId_fkey" FOREIGN KEY ("promotionId") REFERENCES "Promotions"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "CouponCode" ADD CONSTRAINT "CouponCode_promotionId_fkey" FOREIGN KEY ("promotionId") REFERENCES "Promotions"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "CouponCode" ADD CONSTRAINT "CouponCode_promotionId_fkey" FOREIGN KEY ("promotionId") REFERENCES "Promotions"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "PromotionUsage" ADD CONSTRAINT "PromotionUsage_promotionId_fkey" FOREIGN KEY ("promotionId") REFERENCES "Promotions"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -727,7 +784,7 @@ ALTER TABLE "PromotionUsage" ADD CONSTRAINT "PromotionUsage_couponId_fkey" FOREI
 ALTER TABLE "PromotionUsage" ADD CONSTRAINT "PromotionUsage_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "PromotionUsage" ADD CONSTRAINT "PromotionUsage_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "PromotionUsage" ADD CONSTRAINT "PromotionUsage_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "PromotionBudget" ADD CONSTRAINT "PromotionBudget_promotionId_fkey" FOREIGN KEY ("promotionId") REFERENCES "Promotions"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -736,7 +793,7 @@ ALTER TABLE "PromotionBudget" ADD CONSTRAINT "PromotionBudget_promotionId_fkey" 
 ALTER TABLE "PromotionSpend" ADD CONSTRAINT "PromotionSpend_promotionId_fkey" FOREIGN KEY ("promotionId") REFERENCES "Promotions"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "PromotionSpend" ADD CONSTRAINT "PromotionSpend_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "PromotionSpend" ADD CONSTRAINT "PromotionSpend_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "OrderDiscount" ADD CONSTRAINT "OrderDiscount_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -763,10 +820,13 @@ ALTER TABLE "Refund" ADD CONSTRAINT "Refund_paymentId_fkey" FOREIGN KEY ("paymen
 ALTER TABLE "Refund" ADD CONSTRAINT "Refund_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Dispute" ADD CONSTRAINT "Dispute_paymentId_fkey" FOREIGN KEY ("paymentId") REFERENCES "Payment"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Dispute" ADD CONSTRAINT "Dispute_paymentId_fkey" FOREIGN KEY ("paymentId") REFERENCES "Payment"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Dispute" ADD CONSTRAINT "Dispute_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "BankOffer" ADD CONSTRAINT "BankOffer_binRangeId_fkey" FOREIGN KEY ("binRangeId") REFERENCES "BinRange"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "OrderBankOffer" ADD CONSTRAINT "OrderBankOffer_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
