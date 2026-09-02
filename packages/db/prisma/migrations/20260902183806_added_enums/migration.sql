@@ -1,0 +1,124 @@
+/*
+  Warnings:
+
+  - You are about to drop the column `userId` on the `EmailLog` table. All the data in the column will be lost.
+  - Changed the type of `kind` on the `OrderDiscount` table. No cast exists, the column would be dropped and recreated, which cannot be done if there is data, since the column is required.
+
+*/
+-- CreateEnum
+CREATE TYPE "OrderDiscountKind" AS ENUM ('PERCENT_BPS', 'FLAT_AMOUNT', 'BONUS_CREDITS', 'MIXED');
+
+-- DropForeignKey
+ALTER TABLE "EmailLog" DROP CONSTRAINT "EmailLog_userId_fkey";
+
+-- AlterTable
+ALTER TABLE "AdminAuditLog" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "AdminUser" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "BankOffer" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "BinRange" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "CouponCode" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "CreditsLedger" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "DeadLetterEvent" ALTER COLUMN "replayedAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "Dispute" ALTER COLUMN "evidenceDueBy" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "openedAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "resolvedAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "EmailLog" DROP COLUMN "userId",
+ALTER COLUMN "sentAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "IdempotencyRecord" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "Invoice" ALTER COLUMN "issuedAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "Order" ALTER COLUMN "paidAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "OrderBankOffer" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "OrderDiscount" DROP COLUMN "kind",
+ADD COLUMN     "kind" "OrderDiscountKind" NOT NULL,
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "Payment" ALTER COLUMN "authorizedAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "capturedAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "PaymentGatewayConfig" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "PlanPrice" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "Plans" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "PromotionBudget" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "PromotionEffects" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "PromotionRules" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "PromotionSpend" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "PromotionUsage" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "Promotions" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "ReconciliationLog" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "Refund" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "User" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3),
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3);
+
+-- CreateIndex
+CREATE INDEX "Order_status_createdAt_idx" ON "Order"("status", "createdAt");

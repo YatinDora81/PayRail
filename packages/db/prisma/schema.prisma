@@ -89,6 +89,13 @@ enum EffectType {
   BONUS_CREDITS // bonusCredits
 }
 
+enum OrderDiscountKind {
+  PERCENT_BPS
+  FLAT_AMOUNT
+  BONUS_CREDITS
+  MIXED // >1 effect folded into one contribution — money in discountMinor, credits in creditsGranted
+}
+
 /// Why a ledger row exists (with referenceType/Id in a unique = no double-credit).
 enum CreditReason {
   PURCHASE
@@ -207,13 +214,12 @@ model User {
   isLocked       Boolean @default(false) // [ADDED] §6 lockout — checkout refuses 403 BEFORE the idempotency claim
   lockedReason   String? // [ADDED] e.g. CHARGEBACK_NEGATIVE_BALANCE
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+  updatedAt DateTime @db.Timestamptz(3) @default(now()) @updatedAt
 
   orders        Order[]
   creditsLedger CreditsLedger[]
   usages        PromotionUsage[]
-  emails        EmailLog[]
 }
 
 /// Credit packs (one-time purchases), not subscriptions.
@@ -226,8 +232,8 @@ model Plan {
   maxDiscountBps Int  @default(10000) // margin cap across stacked discounts (10000 = none)
   sacCode     String? //              GST SAC/HSN code
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+  updatedAt DateTime @db.Timestamptz(3) @default(now()) @updatedAt
 
   prices  PlanPrice[]
   orders  Order[]
@@ -247,8 +253,8 @@ model PlanPrice {
   amountMinor BigInt
   isActive Boolean  @default(true)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+  updatedAt DateTime @db.Timestamptz(3) @default(now()) @updatedAt
 
   @@unique([planId, country, city])
   @@index([planId, country])
@@ -277,8 +283,8 @@ model Promotions {
   startsAt     DateTime     @db.Timestamptz(3)
   endsAt       DateTime     @db.Timestamptz(3)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+  updatedAt DateTime @db.Timestamptz(3) @default(now()) @updatedAt
 
   rules   PromotionRules[]
   effects PromotionEffects[]
@@ -299,7 +305,7 @@ model PromotionRules {
   ruleType    RuleType
   config      Json //     shape depends on ruleType
 
-  createdAt DateTime @default(now())
+  createdAt DateTime @db.Timestamptz(3) @default(now())
 
   @@index([promotionId])
 }
@@ -315,7 +321,7 @@ model PromotionEffects {
   currency    Currency? //   FLAT_AMOUNT (per-currency)
   bonusCredits Int? //       BONUS_CREDITS
 
-  createdAt DateTime @default(now())
+  createdAt DateTime @db.Timestamptz(3) @default(now())
 
   @@index([promotionId, currency])
 }
@@ -332,8 +338,8 @@ model CouponCode {
   endsAt         DateTime?   @db.Timestamptz(3)
   isActive       Boolean    @default(true)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+  updatedAt DateTime @db.Timestamptz(3) @default(now()) @updatedAt
 
   usages  PromotionUsage[]
   applied OrderDiscount[]
@@ -356,7 +362,7 @@ model PromotionUsage {
   order       Order            @relation(fields: [orderId], references: [id])
   status      ReservationStatus @default(RESERVED)
 
-  createdAt DateTime @default(now())
+  createdAt DateTime @db.Timestamptz(3) @default(now())
 
   @@unique([promotionId, userId, orderId])
   @@index([promotionId, userId, status])
@@ -373,8 +379,8 @@ model PromotionBudget {
   currency    Currency
   capMinor    BigInt //              the ceiling in this currency
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+  updatedAt DateTime @db.Timestamptz(3) @default(now()) @updatedAt
 
   @@unique([promotionId, currency])
 }
@@ -391,7 +397,7 @@ model PromotionSpend {
   orderId     String
   order       Order            @relation(fields: [orderId], references: [id])
 
-  createdAt DateTime @default(now())
+  createdAt DateTime @db.Timestamptz(3) @default(now())
 
   @@index([promotionId, currency])
   @@index([orderId, status])
@@ -408,11 +414,11 @@ model OrderDiscount {
   couponId    String? //              set when coupon-gated
   coupon      CouponCode? @relation(fields: [couponId], references: [id])
 
-  kind           EffectType
+  kind           OrderDiscountKind
   discountMinor  BigInt     @default(0) // money off (0 for credits)
   creditsGranted Int        @default(0) // bonus credits added
 
-  createdAt DateTime @default(now())
+  createdAt DateTime @db.Timestamptz(3) @default(now())
 
   @@unique([orderId, promotionId]) // a promo applies at most once per order
   @@index([orderId])
@@ -450,10 +456,10 @@ model Order {
   traceId String? //                         distributed tracing
 
   expiresAt DateTime  @db.Timestamptz(3) // swept on now()
-  paidAt    DateTime?
+  paidAt    DateTime? @db.Timestamptz(3)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+  updatedAt DateTime @db.Timestamptz(3) @default(now()) @updatedAt
 
   payments Payment[]
   refunds  Refund[]
@@ -464,6 +470,7 @@ model Order {
   invoice  Invoice?
   bankOffers OrderBankOffer[]
 
+  @@index([status, createdAt])
   @@unique([userId, idempotencyKey]) // idempotency per user
   @@unique([gateway, gatewayOrderId]) // gateway id unique per provider (NULLs stay distinct)
   @@index([status, updatedAt]) //          abandoned-order sweep
@@ -485,12 +492,12 @@ model Payment {
   status          PaymentStatus @default(CREATED)
   method          String? //                "card" | "upi" | "netbanking" | ...
   failureReason   String?
-  authorizedAt    DateTime? //              funds held
-  capturedAt      DateTime? //              money taken
+  authorizedAt     DateTime? @db.Timestamptz(3) //              funds held
+  capturedAt       DateTime? @db.Timestamptz(3) //              money taken
   traceId         String?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+  updatedAt DateTime @db.Timestamptz(3) @default(now()) @updatedAt
 
   refunds  Refund[]
   disputes Dispute[]
@@ -513,8 +520,8 @@ model Refund {
   reason         String?
   idempotencyKey String       @unique
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+  updatedAt DateTime @db.Timestamptz(3) @default(now()) @updatedAt
 
   @@index([paymentId])
   @@index([orderId])
@@ -525,25 +532,25 @@ model Refund {
 /// Chargeback — lands AFTER PAID (credits already granted), so LOST/ACCEPTED
 /// claws credits back via a CreditsLedger row (CHARGEBACK / DISPUTE).
 model Dispute {
-  id              String        @id @default(cuid())
-  paymentId       String?
-  payment         Payment?       @relation(fields: [paymentId], references: [id])
-  orderId         String
-  order           Order         @relation(fields: [orderId], references: [id])
-  gateway         Gateway
-  gatewayDisputeId String      @unique
-  status          DisputeStatus @default(NEEDS_RESPONSE)
-  reasonCode      String? //                provider reason code
-  amountMinor     BigInt
-  currency        Currency?
-  evidence        Json? //                  PATCH /disputes/:id/evidence persists it
-  note            String?
-  evidenceDueBy   DateTime? //              deadline to submit evidence
-  openedAt        DateTime      @default(now())
-  resolvedAt      DateTime?
+  id               String        @id @default(cuid())
+  paymentId        String?
+  payment          Payment?      @relation(fields: [paymentId], references: [id])
+  orderId          String
+  order            Order         @relation(fields: [orderId], references: [id])
+  gateway          Gateway
+  gatewayDisputeId String        @unique
+  status           DisputeStatus @default(NEEDS_RESPONSE)
+  reasonCode       String? //                provider reason code
+  amountMinor      BigInt
+  currency         Currency?
+  evidence         Json? //                  PATCH /disputes/:id/evidence persists it
+  note             String?
+  evidenceDueBy    DateTime? @db.Timestamptz(3) //              deadline to submit evidence
+  openedAt         DateTime @db.Timestamptz(3)      @default(now())
+  resolvedAt       DateTime? @db.Timestamptz(3)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+  updatedAt DateTime @db.Timestamptz(3) @default(now()) @updatedAt
 
   @@index([orderId])
   @@index([paymentId])
@@ -580,8 +587,8 @@ model BankOffer {
   endsAt   DateTime @db.Timestamptz(3)
   isActive Boolean  @default(true)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+  updatedAt DateTime @db.Timestamptz(3) @default(now()) @updatedAt
 
   appliedTo OrderBankOffer[]
 
@@ -605,8 +612,8 @@ model OrderBankOffer {
   gatewayOfferId String?
   reimbursed     Boolean           @default(false) // bank settlement reconciled?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+  updatedAt DateTime @db.Timestamptz(3) @default(now()) @updatedAt
 
   @@index([orderId, bankOfferId])
   @@index([bankOfferId])
@@ -624,8 +631,8 @@ model BinRange {
   cardType CardType? 
   isActive Boolean     @default(true)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+  updatedAt DateTime @db.Timestamptz(3) @default(now()) @updatedAt
 
   offers BankOffer[]
 
@@ -649,10 +656,10 @@ model CreditsLedger {
   referenceId   String
   balanceAfter  Int? //                       optional running-balance snapshot
 
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
 
   @@unique([referenceType, referenceId, reason])
-  @@index([userId,id])
+  @@index([userId, id])
 }
 
 model OutboxEvent {
@@ -691,10 +698,10 @@ model Invoice {
   igstMinor     BigInt        @default(0) 
   status        InvoiceStatus @default(ISSUED)
   pdfUrl        String? 
-  issuedAt      DateTime      @default(now())
+  issuedAt      DateTime      @default(now()) @db.Timestamptz(3)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+  updatedAt DateTime @db.Timestamptz(3) @default(now()) @updatedAt
 
   @@unique([series, number]) 
   @@index([status, issuedAt])
@@ -719,8 +726,8 @@ model PaymentGatewayConfig {
   supportedCurrencies Currency[]
   config              Json //                  non-secret settings only
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+  updatedAt DateTime @db.Timestamptz(3) @default(now()) @updatedAt
 }
 
 /// Inbound webhooks. eventId unique (dedup). Verify HMAC on rawBody, store
@@ -747,16 +754,14 @@ model WebhookEvents {
 /// the Kafka email workers.
 model EmailLog {
   id       String      @id @default(cuid())
-  userId   String? //                              [DEAD]
-  user     User?       @relation(fields: [userId], references: [id])
   to       String      @map("toEmail") 
   template String //                               "ORDER_PAID" | "REFUND_DONE"
   refType  String      @map("referenceType") 
   refId    String      @map("referenceId") 
   status   EmailStatus @default(PENDING)
-  sentAt   DateTime? 
+  sentAt   DateTime? @db.Timestamptz(3)
 
-  createdAt DateTime @default(now())
+  createdAt DateTime @db.Timestamptz(3) @default(now())
 
   @@unique([template, refType, refId])
   @@index([status])
@@ -774,8 +779,8 @@ model AdminUser {
   role     AdminRole @default(READONLY)
   isActive Boolean   @default(true)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+  updatedAt DateTime @db.Timestamptz(3) @default(now()) @updatedAt
 
   auditLogs AdminAuditLog[]
 }
@@ -793,9 +798,9 @@ model AdminAuditLog {
   ip         String?
   userAgent  String?
 
-  createdAt DateTime @default(now())
+  createdAt DateTime @db.Timestamptz(3) @default(now())
 
-  @@index([actorId,createdAt])
+  @@index([actorId, createdAt])
   @@index([entityType, entityId])
   @@index([createdAt])
 }
@@ -813,7 +818,7 @@ model IdempotencyRecord {
   status         IdempotencyStatus @default(IN_PROGRESS)
   expiresAt      DateTime          @db.Timestamptz(3)
 
-  createdAt DateTime @default(now())
+  createdAt DateTime @db.Timestamptz(3) @default(now())
 
   @@unique([userId, endpoint, idempotencyKey])
   @@index([expiresAt])
@@ -828,10 +833,10 @@ model DeadLetterEvent {
   payload     Json
   reason      String 
   needsReview Boolean   @default(false) 
-  replayedAt  DateTime? 
+  replayedAt  DateTime? @db.Timestamptz(3)
   replayedBy  String? 
 
-  createdAt DateTime @default(now())
+  createdAt DateTime @db.Timestamptz(3) @default(now())
 
   @@index([source, createdAt])
   @@index([needsReview])
@@ -851,7 +856,7 @@ model ReconciliationLog {
   deadLetterId     String? 
   note             String? 
 
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
 
   @@index([promotionId, currency])
   @@index([kind, createdAt]) 
