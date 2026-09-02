@@ -25,9 +25,10 @@ enum Currency {
 /// = a promo must opt IN to stacking, never combine silently.
 enum StackingMode {
   EXCLUSIVE //          combines with nothing
-  STACK_PROMOS //       with promos, not coupons
-  STACK_WITH_COUPONS // with coupons, not promos
-  STACK_ALL //          with both
+  // STACK_PROMOS //       with promos, not coupons
+  // STACK_WITH_COUPONS // with coupons, not promos
+  // STACK_ALL //          with both
+  STACKABLE
 }
 
 /// Order lifecycle. Drives the sweeper (EXPIRED) and settlement (PAID).
@@ -322,8 +323,8 @@ model PromotionEffects {
 /// Coupon codes under a promotion; redeemedCount is a cache (PromotionUsage is truth).
 model CouponCode {
   id             String     @id @default(cuid())
-  promotionId    String?
-  promotion      Promotions? @relation(fields: [promotionId], references: [id])
+  promotionId    String
+  promotion      Promotions @relation(fields: [promotionId], references: [id])
   code           String     @unique
   maxRedemptions Int?
   perUserLimit   Int        @default(1)
@@ -467,6 +468,8 @@ model Order {
   @@unique([gateway, gatewayOrderId]) // gateway id unique per provider (NULLs stay distinct)
   @@index([status, updatedAt]) //          abandoned-order sweep
   @@index([userId])
+  @@index([status, expiresAt])
+  @@index([gatewayOrderId])
 }
 
 /// One order -> many attempts; amountMinor is per-attempt for exact refund math.
