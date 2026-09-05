@@ -7,6 +7,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/lucsky/cuid"
+	"github.com/payrail/go/internal/events"
+	"github.com/payrail/go/internal/telemetry"
 )
 
 type Store struct {
@@ -379,4 +382,380 @@ func (s *Store) CreditsForUser(ctx context.Context, userID, cursor string, limit
 		out.Ledger = append(out.Ledger, e)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) InsertDeadLetter(ctx context.Context, source, topic, key string, payload []byte, reason string) error {
+	telemetry.Counter("payrail_dlq_parked_total").Add(ctx, 1)
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO "DeadLetterEvent" ("id","source","topic","key","payload","reason")
+		VALUES ($1,$2,$3,$4,$5,$6)`,
+		cuid.New(), source, topic, key, payload, reason)
+	return err
+}
+
+func (s *Store) AssignInvoice(ctx context.Context, orderID, series, currency string, amountMinor int64) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, orderID); err != nil {
+		return err
+	}
+
+	var exists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM "Invoice" WHERE "orderId" = $1)`, orderID).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return tx.Commit(ctx) // replayed order.paid — already numbered
+	}
+
+	var n int
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO "InvoiceCounter" ("series","next") VALUES ($1, 2)
+		ON CONFLICT ("series") DO UPDATE SET "next" = "InvoiceCounter"."next" + 1
+		RETURNING "next" - 1`, series).Scan(&n); err != nil {
+		return err
+	}
+	taxMinor := TaxIncludedMinor(currency, amountMinor)
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO "Invoice" ("id","orderId","series","number","currency","amountMinor","taxBps","taxMinor")
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		-- belt-and-braces under the advisory lock — no double invoice, ever
+		ON CONFLICT ("orderId") DO NOTHING`,
+		cuid.New(), orderID, series, n, currency, amountMinor,
+		gstBpsByCurrency[currency], taxMinor); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE "Order" SET "taxAmountMinor" = $2, "updatedAt" = now()
+		WHERE "id" = $1`, orderID, taxMinor); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) SettleRefund(ctx context.Context, t RefundTarget, gatewayRefundID string, receipt []byte) (clawed int, err error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+
+	// §5: RefundDone may only apply to a refund still in flight.
+	ct, err := tx.Exec(ctx, `
+		UPDATE "Refund" SET "status" = 'PROCESSED', "gatewayRefundId" = COALESCE(NULLIF($2,''), "gatewayRefundId"), "updatedAt" = now()
+		WHERE "id" = $1 AND "status" IN ('PENDING','PROCESSING')`, t.RefundID, gatewayRefundID)
+	if err != nil {
+		return 0, err
+	}
+	if ct.RowsAffected() == 0 {
+		var cur string
+		if err := tx.QueryRow(ctx, `SELECT "status" FROM "Refund" WHERE "id" = $1`, t.RefundID).Scan(&cur); err != nil {
+			return 0, err
+		}
+		if cur == "PROCESSED" {
+			return 0, tx.Commit(ctx) // idempotent replay
+		}
+		return 0, ErrStaleRefund // FAILED etc. — park, never resurrect
+	}
+
+	// maths formula to get rid of fractions mismatch
+	var refundedAfter int64
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(SUM("amountMinor"), 0) FROM "Refund"
+		WHERE "orderId" = $1 AND "status" = 'PROCESSED'`, t.OrderID).Scan(&refundedAfter); err != nil {
+		return 0, err
+	}
+	refundedBefore := refundedAfter - t.AmountMinor
+
+	clawTotal := func(x int64) int64 {
+		if t.CapturedMinor <= 0 {
+			return 0
+		}
+		return int64(t.CreditsGranted) * x / t.CapturedMinor
+	}
+	clawed = int(clawTotal(refundedAfter) - clawTotal(refundedBefore))
+
+	if clawed > 0 {
+		if _, err := tx.Exec(ctx, `
+			WITH ins AS (
+				INSERT INTO "CreditsLedger" ("id","userId","delta","reason","referenceType","referenceId")
+				VALUES ($1,$2,$3,'REFUND','REFUND',$4)
+				ON CONFLICT ("referenceType","referenceId","reason") DO NOTHING  -- dedupe key = (REFUND, refundId, REFUND) → one clawback per refund, ever
+				RETURNING "delta"
+			), clawback AS (
+				-- exactly one row: the freshly inserted delta, or 0 on a dedupe replay
+				SELECT COALESCE(SUM("delta"), 0) AS "delta" FROM ins
+			)
+			UPDATE "User" SET "creditsBalance" = "creditsBalance" + clawback."delta"
+			FROM clawback
+			WHERE "id" = $2`,
+			cuid.New(), t.UserID, -clawed, t.RefundID); err != nil {
+			return 0, err
+		}
+	}
+
+	next := "PARTIALLY_REFUNDED"
+	if refundedAfter >= t.CapturedMinor { // ≥ not ==: a goodwill over-refund still lands on REFUNDED
+		next = "REFUNDED"
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE "Order" SET "status" = $2, "updatedAt" = now()
+		WHERE "id" = $1 AND "status" IN ('PAID','PARTIALLY_REFUNDED')`, t.OrderID, next); err != nil {
+		return 0, err
+	}
+
+	// REFUND_DONE mail rides the outbox with the clawback it announces (§2).
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO "OutboxEvent" ("id","topic","partitionKey","payload")
+		VALUES ($1,$2,$3,$4)`,
+		cuid.New(), events.TopicOrderRefunded, t.OrderID, receipt); err != nil {
+		return 0, err
+	}
+	return clawed, tx.Commit(ctx)
+}
+
+func (s *Store) MarkRefundFailed(ctx context.Context, refundID string) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE "Refund" SET "status" = 'FAILED', "updatedAt" = now()
+		WHERE "id" = $1 AND "status" IN ('PENDING','PROCESSING')`, refundID)
+	if err != nil {
+		return err
+	}
+
+	if tag.RowsAffected() == 1 {
+		telemetry.Counter("payrail_refunds_failed_total").Add(ctx, 1)
+	}
+	return nil
+}
+
+type DisputeTarget struct {
+	OrderID        string
+	UserID         string
+	Status         string // current order status
+	CreditsGranted int
+}
+
+func (s *Store) FindOrderForDispute(ctx context.Context, gateway, gatewayPaymentID string) (DisputeTarget, error) {
+	const q = `
+		SELECT o."id", o."userId", o."status", o."creditsGranted"
+		FROM "Payment" p JOIN "Order" o ON o."id" = p."orderId"
+		WHERE p."gateway" = $1 AND p."gatewayPaymentId" = $2`
+	var t DisputeTarget
+	err := s.pool.QueryRow(ctx, q, gateway, gatewayPaymentID).Scan(&t.OrderID, &t.UserID, &t.Status, &t.CreditsGranted)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return DisputeTarget{}, ErrNotFound
+	}
+	return t, err
+}
+
+func (s *Store) SettleDispute(ctx context.Context, t DisputeTarget, gateway, gatewayDisputeID, disputeStatus string, amountMinor int64) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO "Dispute" ("id","orderId","gateway","gatewayDisputeId","amountMinor","status","updatedAt")
+		VALUES ($1,$2,$3,$4,$5,$6, now())
+		ON CONFLICT ("gatewayDisputeId") DO UPDATE SET "status" = EXCLUDED."status", "updatedAt" = now()`,
+		cuid.New(), t.OrderID, gateway, gatewayDisputeID, amountMinor, disputeStatus); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE "Order" SET "status" = 'DISPUTED', "updatedAt" = now()
+		WHERE "id" = $1 AND "status" IN ('PAID','PARTIALLY_REFUNDED')`, t.OrderID); err != nil {
+		return err
+	}
+
+	if disputeStatus == "LOST" {
+		var alreadyClawed int64
+		if err := tx.QueryRow(ctx, `
+			WITH clawback_refs AS (
+				-- this dispute itself, plus every refund row of the order
+				SELECT 'DISPUTE' AS "referenceType", $2 AS "referenceId"
+				UNION ALL
+				SELECT 'REFUND', r."id" FROM "Refund" r WHERE r."orderId" = $3
+			)
+			SELECT COALESCE(SUM(-l."delta"), 0)  -- clawbacks are negative deltas ⇒ negate into a positive total
+			FROM "CreditsLedger" l
+			JOIN clawback_refs USING ("referenceType", "referenceId")  -- count only ledger rows whose (type,id) pair is in the set above
+			WHERE l."userId" = $1
+			  AND l."reason" IN ('REFUND','CHARGEBACK')`,
+			t.UserID, gatewayDisputeID, t.OrderID).Scan(&alreadyClawed); err != nil {
+			return err
+		}
+		remaining := int64(t.CreditsGranted) - alreadyClawed
+		if remaining > 0 {
+
+			var newBalance int64
+			if err := tx.QueryRow(ctx, `
+				WITH ins AS (
+					INSERT INTO "CreditsLedger" ("id","userId","delta","reason","referenceType","referenceId")
+					VALUES ($1,$2,$3,'CHARGEBACK','DISPUTE',$4)
+					ON CONFLICT ("referenceType","referenceId","reason") DO NOTHING  -- dedupe key = (DISPUTE, disputeId, CHARGEBACK) → replay-safe
+					RETURNING "delta"
+				), clawback AS (
+					-- exactly one row: the freshly inserted delta, or 0 on a dedupe replay
+					SELECT COALESCE(SUM("delta"), 0) AS "delta" FROM ins
+				)
+				UPDATE "User"
+				   -- cache floors at 0; the ledger keeps the true negative (checked below)
+				   SET "creditsBalance" = GREATEST("creditsBalance" + clawback."delta", 0)
+				FROM clawback
+				WHERE "id" = $2
+				RETURNING "creditsBalance"`,
+				cuid.New(), t.UserID, -remaining, gatewayDisputeID).Scan(&newBalance); err != nil {
+				return err
+			}
+
+			if _, err := tx.Exec(ctx, `
+				WITH true_balance AS (
+					-- the ledger is truth; the cached balance above was clamped at 0
+					SELECT COALESCE(SUM("delta"), 0) AS "balance"
+					FROM "CreditsLedger" WHERE "userId" = $1
+				)
+				UPDATE "User"
+				   SET "isLocked" = true, "lockedReason" = 'CHARGEBACK_NEGATIVE_BALANCE'
+				FROM true_balance tb
+				-- lock ONLY when ledger-truth is negative — the clamp above hid it
+				WHERE "id" = $1 AND tb."balance" < 0`,
+				t.UserID); err != nil {
+				return err
+			}
+		}
+	}
+
+	if disputeStatus == "WON" {
+		var refunded, captured int64
+		if err := tx.QueryRow(ctx, `
+			SELECT COALESCE(SUM("amountMinor"),0) FROM "Refund"
+			WHERE "orderId" = $1 AND "status" = 'PROCESSED'`, t.OrderID).Scan(&refunded); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `
+			SELECT COALESCE(SUM("amountMinor"),0) FROM "Payment"
+			WHERE "orderId" = $1 AND "status" = 'CAPTURED'`, t.OrderID).Scan(&captured); err != nil {
+			return err
+		}
+		restored := "PAID"
+		if refunded > 0 && refunded >= captured {
+			restored = "REFUNDED"
+		} else if refunded > 0 {
+			restored = "PARTIALLY_REFUNDED"
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE "Order" SET "status" = $2, "updatedAt" = now()
+			WHERE "id" = $1 AND "status" = 'DISPUTED'`, t.OrderID, restored); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+type SettleTarget struct {
+	OrderID          string
+	UserID           string
+	Email            string
+	Status           string
+	Currency         string
+	FinalAmountMinor int64
+	CreditsGranted   int
+}
+
+func (s *Store) FindOrderForSettlement(ctx context.Context, gateway, gatewayOrderID string) (SettleTarget, error) {
+	const q = `
+		SELECT o."id", o."userId", u."email", o."status", o."currency", o."finalAmountMinor", o."creditsGranted"
+		FROM "Order" o JOIN "User" u ON u."id" = o."userId"
+		WHERE o."gateway" = $1 AND o."gatewayOrderId" = $2`
+	var t SettleTarget
+	err := s.pool.QueryRow(ctx, q, gateway, gatewayOrderID).Scan(
+		&t.OrderID, &t.UserID, &t.Email, &t.Status, &t.Currency, &t.FinalAmountMinor, &t.CreditsGranted)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return SettleTarget{}, ErrNotFound
+	}
+	return t, err
+}
+
+var ErrStaleSettlement = errors.New("stale settlement: order is not in a capturable state")
+
+func (s *Store) SettleOrder(ctx context.Context, t SettleTarget, gateway, gatewayPaymentID string, receipt []byte) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	ct, err := tx.Exec(ctx, `
+		UPDATE "Order" SET "status" = 'PAID', "updatedAt" = now()
+		WHERE "id" = $1 AND "status" IN ('CREATED','PENDING_PAYMENT','AUTHORIZED')`, t.OrderID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 { 
+		var cur string
+		if err := tx.QueryRow(ctx, `SELECT "status" FROM "Order" WHERE "id" = $1`, t.OrderID).Scan(&cur); err != nil {
+			return err
+		}
+		if cur == "PAID" {
+			return tx.Commit(ctx) 
+		}
+		return ErrStaleSettlement 
+	}
+
+	if _, err := tx.Exec(ctx, `
+		WITH ins AS (
+			INSERT INTO "CreditsLedger" ("id","userId","delta","reason","referenceType","referenceId")
+			VALUES ($1,$2,$3,'PURCHASE','ORDER',$4)
+			ON CONFLICT ("referenceType","referenceId","reason") DO NOTHING  -- dedupe key = (ORDER, orderId, PURCHASE) → replay inserts NOTHING…
+			RETURNING "delta"
+		), granted AS (
+			-- exactly one row: the freshly inserted delta, or 0 on a dedupe replay
+			SELECT COALESCE(SUM("delta"), 0) AS "delta" FROM ins
+		)
+		UPDATE "User" SET "creditsBalance" = "creditsBalance" + granted."delta"  -- …so delta=0 and this bump is a no-op on replay
+		FROM granted
+		WHERE "id" = $2`,
+		cuid.New(), t.UserID, t.CreditsGranted, t.OrderID); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE "PromotionSpend" SET "status" = 'CONSUMED'
+		WHERE "orderId" = $1 AND "status" = 'RESERVED'`, t.OrderID); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE "PromotionUsage" SET "status" = 'CONSUMED'
+		WHERE "orderId" = $1 AND "status" = 'RESERVED'`, t.OrderID); err != nil {
+		return err
+	}
+
+	if gatewayPaymentID != "" {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO "Payment" ("id","orderId","gateway","gatewayPaymentId","amountMinor","currency","status","capturedAt","updatedAt")
+			VALUES ($1,$2,$3,$4,$5,$6,'CAPTURED', now(), now())
+			-- same capture retried ⇒ refresh in place, never a second money row
+			ON CONFLICT ("gatewayPaymentId") DO UPDATE SET "status" = 'CAPTURED', "capturedAt" = now(), "updatedAt" = now()`,
+			cuid.New(), t.OrderID, gateway, gatewayPaymentID, t.FinalAmountMinor, t.Currency); err != nil {
+			return err
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO "OutboxEvent" ("id","topic","partitionKey","payload")
+		VALUES ($1,$2,$3,$4)`,
+		cuid.New(), events.TopicOrderPaid, t.OrderID, receipt); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }

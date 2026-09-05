@@ -29,3 +29,23 @@ type PaymentEvent struct {
 	Currency         string    `json:"currency"`
 	OccurredAt       time.Time `json:"occurredAt"`
 }
+
+type OrderPaid struct {
+	OrderID        string `json:"orderId"`
+	UserID         string `json:"userId"`
+	Email          string `json:"email"`
+	CreditsGranted int    `json:"creditsGranted"`
+	Currency       string `json:"currency"`
+	AmountMinor    string `json:"amountMinor"` // money as string
+}
+
+
+type OrderRefunded struct {
+	OrderID           string `json:"orderId"`
+	RefundID          string `json:"refundId"`
+	UserID            string `json:"userId"`
+	Email             string `json:"email"`
+	CreditsClawedBack int    `json:"creditsClawedBack"`
+	Currency          string `json:"currency"`
+	AmountMinor       string `json:"amountMinor"`
+}
