@@ -1,5 +1,5 @@
 {
-  "name": "@repo/db",
+  "name": "@payrail/db",
   "module": "index.ts",
   "type": "module",
   "private": true,
