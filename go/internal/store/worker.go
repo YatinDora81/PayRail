@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/lucsky/cuid"
@@ -149,4 +150,111 @@ func (s *Store) BudgetsForPromotion(ctx context.Context, promotionID string) ([]
 	      LEFT JOIN spend_totals st ON st."promotionId" = b."promotionId" AND st."currency" = b."currency"
 	      WHERE b."promotionId" = $1`
 	return s.scanBudgetRows(ctx, q, promotionID)
+}
+
+func (s *Store) ListExpiredOrderIDs(ctx context.Context, limit int) ([]string, error) {
+	const q = `
+		SELECT "id" FROM "Order"
+		WHERE "status" IN ('CREATED','PENDING_PAYMENT') AND "expiresAt" < now()
+		ORDER BY "expiresAt" ASC
+		LIMIT $1`
+	rows, err := s.pool.Query(ctx, q, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+type Released struct {
+	PromotionID string
+	Currency    string
+	AmountMinor int64
+}
+
+func (s *Store) ExpireOrderAndRelease(ctx context.Context, orderID string) (bool, []Released, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	ct, err := tx.Exec(ctx, `
+		UPDATE "Order" SET "status" = 'EXPIRED', "updatedAt" = now()
+		WHERE "id" = $1 AND "status" IN ('CREATED','PENDING_PAYMENT')`, orderID)
+	if err != nil {
+		return false, nil, err
+	}
+	if ct.RowsAffected() == 0 {
+		return false, nil, tx.Commit(ctx)
+	}
+
+	rows, err := tx.Query(ctx, `
+		SELECT "promotionId","currency","amountMinor" FROM "PromotionSpend"
+		WHERE "orderId" = $1 AND "status" = 'RESERVED'`, orderID)
+	if err != nil {
+		return false, nil, err
+	}
+
+	var released []Released
+	for rows.Next() {
+		var r Released
+		if err := rows.Scan(&r.PromotionID, &r.Currency, &r.AmountMinor); err != nil {
+			rows.Close()
+			return false, nil, err
+		}
+		released = append(released, r)
+	}
+
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return false, nil, err
+	}
+
+	for _, r := range released {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO "PromotionSpend" ("id","promotionId","currency","amountMinor","status","orderId")
+			-- sign flip: the release row stores −amountMinor
+			VALUES ($1,$2,$3,$4,'RELEASED',$5)`,
+			cuid.New(), r.PromotionID, r.Currency, -r.AmountMinor, orderID); err != nil {
+			return false, nil, err
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE "PromotionUsage" SET "status" = 'RELEASED'
+		WHERE "orderId" = $1 AND "status" = 'RESERVED'`, orderID); err != nil {
+		return false, nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return false, nil, err
+	}
+	return true, released, nil
+}
+
+func (s *Store) PurgeWebhookEvidence(ctx context.Context, olderThan time.Duration, limit int) (int64, error) {
+	ct, err := s.pool.Exec(ctx, `
+		WITH batch AS (
+			SELECT "ctid" FROM "WebhookEvents"  -- ctid = physical row address — cheapest join handle for a batch UPDATE
+			WHERE "receivedAt" < now() - $1::interval AND "purgedAt" IS NULL  -- purgedAt is the tombstone: row + bodySha stay, evidence goes
+			LIMIT $2
+		)
+		UPDATE "WebhookEvents" w
+		   SET "rawBody" = NULL, "signature" = NULL, "purgedAt" = now()
+		FROM batch
+		WHERE w."ctid" = batch."ctid"`,
+		olderThan, limit)
+	if err != nil {
+		return 0, err
+	}
+	return ct.RowsAffected(), nil
 }

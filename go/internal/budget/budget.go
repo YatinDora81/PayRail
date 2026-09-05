@@ -126,3 +126,7 @@ func (g *Gate) Seed(ctx context.Context, promoID, currency string, remaining int
 func (g *Gate) AdjustBy(ctx context.Context, promoID, currency string, delta int64) error {
 	return g.rdb.IncrBy(ctx, key(promoID, currency), delta).Err()
 }
+
+func (g *Gate) Release(ctx context.Context, promoID, currency string, amountMinor int64) error {
+	return g.ReleaseN(ctx, currency, []Item{{PromoID: promoID, AmountMinor: amountMinor}})
+}

@@ -249,3 +249,29 @@ func LoadReconciler() (ReconcilerConfig, error) {
 	}
 	return c, nil
 }
+
+type SweeperConfig struct {
+	DatabaseURL      string
+	RedisURL         string
+	Interval         time.Duration
+	BatchSize        int
+	WebhookRetention time.Duration 
+	OutboxRetention  time.Duration 
+	Env              string
+}
+
+func LoadSweeper() (SweeperConfig, error) {
+	c := SweeperConfig{
+		DatabaseURL:      os.Getenv("DATABASE_URL"),
+		RedisURL:         env("REDIS_URL", "redis://localhost:6379"),
+		Interval:         envDur("SWEEP_INTERVAL", 30*time.Second),
+		BatchSize:        envInt("SWEEP_BATCH", 200),
+		WebhookRetention: envDur("WEBHOOK_RETENTION", 90*24*time.Hour),
+		OutboxRetention:  envDur("OUTBOX_RETENTION", 7*24*time.Hour),
+		Env:              env("ENV", "development"),
+	}
+	if c.DatabaseURL == "" {
+		return c, fmt.Errorf("DATABASE_URL is required")
+	}
+	return c, nil
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lucsky/cuid"
@@ -99,7 +100,7 @@ func (s *Store) BumpAttemptsOrPark(ctx context.Context, id string, max int) erro
 		return err
 	}
 	if attempts < max {
-		return tx.Commit(ctx) 
+		return tx.Commit(ctx)
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -115,9 +116,23 @@ func (s *Store) BumpAttemptsOrPark(ctx context.Context, id string, max int) erro
 	return tx.Commit(ctx)
 }
 
-
 func (s *Store) MarkPublished(ctx context.Context, id string) error {
 	_, err := s.pool.Exec(ctx, `
 		UPDATE "OutboxEvent" SET "publishedAt" = now() WHERE "id" = $1`, id)
 	return err
+}
+
+func (s *Store) PurgePublishedOutbox(ctx context.Context, olderThan time.Duration, limit int) (int64, error) {
+	cutoff := time.Now().Add(-olderThan)
+	ct, err := s.pool.Exec(ctx, `
+		DELETE FROM "OutboxEvent"
+		WHERE "id" IN (
+			SELECT "id" FROM "OutboxEvent"
+			WHERE "publishedAt" IS NOT NULL AND "publishedAt" < $1
+			LIMIT $2
+		)`, cutoff, limit)
+	if err != nil {
+		return 0, err
+	}
+	return ct.RowsAffected(), nil
 }
