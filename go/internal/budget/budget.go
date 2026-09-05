@@ -110,3 +110,19 @@ func (g *Gate) ReleaseN(ctx context.Context, currency string, items []Item) erro
 	}
 	return first
 }
+
+func (g *Gate) Current(ctx context.Context, promoID, currency string) (int64, error) {
+	v, err := g.rdb.Get(ctx, key(promoID, currency)).Int64()
+	if err == redis.Nil {
+		return 0, ErrNotSeeded
+	}
+	return v, err
+}
+
+func (g *Gate) Seed(ctx context.Context, promoID, currency string, remaining int64) error {
+	return g.rdb.SetNX(ctx, key(promoID, currency), remaining, 0).Err()
+}
+
+func (g *Gate) AdjustBy(ctx context.Context, promoID, currency string, delta int64) error {
+	return g.rdb.IncrBy(ctx, key(promoID, currency), delta).Err()
+}

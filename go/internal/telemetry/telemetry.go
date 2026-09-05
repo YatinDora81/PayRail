@@ -1,11 +1,16 @@
 package telemetry
 
 import (
+	"sync"
+
 	"context"
 	"log/slog"
-	"sync"
+	"net/http"
 	"time"
 
+	promclient "github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/metric"
@@ -13,7 +18,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -97,4 +102,30 @@ func Counter(name string) metric.Int64Counter {
 	}
 	counters.Store(name, c)
 	return c
+}
+
+var registry = func() *promclient.Registry {
+	r := promclient.NewRegistry()
+	r.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+	return r
+}()
+
+func MetricsHandler() http.Handler {
+	return promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
+}
+
+var gauges sync.Map
+
+func Gauge(name string) metric.Int64Gauge {
+	if g, ok := gauges.Load(name); ok {
+		return g.(metric.Int64Gauge)
+	}
+	g, err := otel.Meter("payrail").Int64Gauge(name)
+	if err != nil {
+		var n noop.Int64Gauge
+		gauges.Store(name, metric.Int64Gauge(n))
+		return n
+	}
+	gauges.Store(name, g)
+	return g
 }

@@ -5,9 +5,10 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/lucsky/cuid"
 )
 
-var ErrStaleRefund = errors.New("stale refund event: refund is not in a settleable state")	
+var ErrStaleRefund = errors.New("stale refund event: refund is not in a settleable state")
 
 type RefundTarget struct {
 	RefundID       string
@@ -42,4 +43,110 @@ func (s *Store) FindRefundForSettlement(ctx context.Context, gateway, gatewayRef
 		return RefundTarget{}, ErrNotFound
 	}
 	return t, err
+}
+
+type PromotionBudgetRow struct {
+	PromotionID    string
+	Currency       string
+	CapMinor       int64
+	RemainingMinor int64
+}
+
+const spendTotalsCTE = `WITH spend_totals AS (
+		SELECT "promotionId", "currency", SUM("amountMinor") AS "spentMinor"
+		FROM "PromotionSpend"
+		GROUP BY "promotionId", "currency"
+	)`
+
+const budgetRemainingExpr = `b."capMinor" - COALESCE(st."spentMinor", 0)`
+
+func (s *Store) ActiveBudgets(ctx context.Context) ([]PromotionBudgetRow, error) {
+	q := spendTotalsCTE + `
+	      SELECT b."promotionId", b."currency", b."capMinor", ` + budgetRemainingExpr + `
+	      FROM "PromotionBudget" b
+	      JOIN "Promotions" p ON p."id" = b."promotionId"
+	      LEFT JOIN spend_totals st ON st."promotionId" = b."promotionId" AND st."currency" = b."currency"
+	      WHERE p."isActive" = true AND p."startsAt" <= now() AND p."endsAt" >= now()`
+	return s.scanBudgetRows(ctx, q)
+}
+
+func (s *Store) scanBudgetRows(ctx context.Context, q string, args ...any) ([]PromotionBudgetRow, error) {
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PromotionBudgetRow
+	for rows.Next() {
+		var r PromotionBudgetRow
+		if err := rows.Scan(&r.PromotionID, &r.Currency, &r.CapMinor, &r.RemainingMinor); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ClearPendingDrift(ctx context.Context, promotionID, currency string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE "ReconciliationLog" SET "corrected" = true
+		WHERE "kind" = 'BUDGET_DRIFT_PENDING' AND "promotionId" = $1 AND "currency" = $2 AND "corrected" = false`,
+		promotionID, currency)
+	return err
+}
+
+func (s *Store) BudgetRemaining(ctx context.Context, promotionID, currency string) (int64, error) {
+	q := spendTotalsCTE + `
+	      SELECT ` + budgetRemainingExpr + `
+	      FROM "PromotionBudget" b
+	      LEFT JOIN spend_totals st ON st."promotionId" = b."promotionId" AND st."currency" = b."currency"
+	      WHERE b."promotionId" = $1 AND b."currency" = $2`
+	var remaining int64
+	err := s.pool.QueryRow(ctx, q, promotionID, currency).Scan(&remaining)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	return remaining, err
+}
+
+func (s *Store) PendingDrift(ctx context.Context, promotionID, currency string) (driftMinor int64, found bool, err error) {
+	err = s.pool.QueryRow(ctx, `
+		SELECT "driftMinor" FROM "ReconciliationLog"
+		WHERE "kind" = 'BUDGET_DRIFT_PENDING' AND "promotionId" = $1 AND "currency" = $2 AND "corrected" = false
+		ORDER BY "createdAt" DESC LIMIT 1`, promotionID, currency).Scan(&driftMinor)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, nil
+	}
+	return driftMinor, err == nil, err
+}
+
+func (s *Store) RecordPendingDrift(ctx context.Context, promotionID, currency string, driftMinor int64) error {
+	if err := s.ClearPendingDrift(ctx, promotionID, currency); err != nil { // one open row per counter
+		return err
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO "ReconciliationLog" ("id","kind","promotionId","currency","driftMinor","note")
+		VALUES ($1,'BUDGET_DRIFT_PENDING',$2,$3,$4,'awaiting second-tick confirmation')`,
+		cuid.New(), promotionID, currency, driftMinor)
+	return err
+}
+
+func (s *Store) LogDrift(ctx context.Context, promotionID, currency string, driftMinor int64) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO "ReconciliationLog" ("id","kind","promotionId","currency","driftMinor","corrected")
+		VALUES ($1,'BUDGET_DRIFT',$2,$3,$4,true)`,
+		cuid.New(), promotionID, currency, driftMinor)
+	if err != nil {
+		return err
+	}
+	return s.ClearPendingDrift(ctx, promotionID, currency)
+}
+
+func (s *Store) BudgetsForPromotion(ctx context.Context, promotionID string) ([]PromotionBudgetRow, error) {
+	q := spendTotalsCTE + `
+	      SELECT b."promotionId", b."currency", b."capMinor", ` + budgetRemainingExpr + `
+	      FROM "PromotionBudget" b
+	      LEFT JOIN spend_totals st ON st."promotionId" = b."promotionId" AND st."currency" = b."currency"
+	      WHERE b."promotionId" = $1`
+	return s.scanBudgetRows(ctx, q, promotionID)
 }

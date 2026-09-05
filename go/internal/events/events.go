@@ -49,3 +49,13 @@ type OrderRefunded struct {
 	Currency          string `json:"currency"`
 	AmountMinor       string `json:"amountMinor"`
 }
+
+type PromotionBudgetUpserted struct {
+	PromotionID string `json:"promotionId"`
+	Currency    string `json:"currency"`
+	CapMinor    string `json:"capMinor"` 
+}
+
+type PromotionActivated struct {
+	PromotionID string `json:"promotionId"`
+}

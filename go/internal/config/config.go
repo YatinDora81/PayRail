@@ -224,3 +224,28 @@ func brokers(key, def string) []string {
 	}
 	return out
 }
+
+
+type ReconcilerConfig struct {
+	Brokers     []string
+	DatabaseURL string
+	RedisURL    string
+	GroupID     string
+	Interval    time.Duration
+	Env         string
+}
+
+func LoadReconciler() (ReconcilerConfig, error) {
+	c := ReconcilerConfig{
+		Brokers:     brokers("KAFKA_BROKERS", "localhost:9092"),
+		DatabaseURL: os.Getenv("DATABASE_URL"),
+		RedisURL:    env("REDIS_URL", "redis://localhost:6379"),
+		GroupID:     env("GROUP_ID", "reconciler"),
+		Interval:    envDur("RECONCILE_INTERVAL", 60*time.Second),
+		Env:         env("ENV", "development"),
+	}
+	if c.DatabaseURL == "" {
+		return c, fmt.Errorf("DATABASE_URL is required")
+	}
+	return c, nil
+}
