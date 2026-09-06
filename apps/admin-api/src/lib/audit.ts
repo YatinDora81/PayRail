@@ -1,10 +1,10 @@
-import type { Prisma } from "@repo/db";
-import { prisma } from "./prisma";
-import { jsonSafe } from "./json";
-import { requireContext } from "../context/requestContext";
+import type { Prisma } from '@payrail/db';
+import { prisma } from './prisma';
+import { jsonSafe } from './json';
+import { requireContext } from '../context/requestContext';
 
 interface AuditInput {
-  action: string; //e.g. "promotion.create" | "refund.issue"
+  action: string; //      e.g. "promotion.create" | "refund.issue"
   entityType: string; //  e.g. "Promotions" | "Refund"
   entityId?: string | null;
   before?: unknown;
@@ -17,7 +17,7 @@ export async function writeAudit(
 ): Promise<void> {
   const ctx = requireContext();
   if (!ctx.actor) {
-    throw new Error("writeAudit called without an authenticated actor");
+    throw new Error('writeAudit called without an authenticated actor');
   }
 
   await client.adminAuditLog.create({
@@ -27,19 +27,14 @@ export async function writeAudit(
       entityType: input.entityType,
       entityId: input.entityId ?? null,
       before: jsonSafe(input.before) as Prisma.InputJsonValue | undefined,
-      after: jsonSafe(input.after) as Prisma.InputJsonObject | undefined,
+      after: jsonSafe(input.after) as Prisma.InputJsonValue | undefined,
       ip: ctx.ip,
       userAgent: ctx.userAgent,
-    
     },
   });
 
   ctx.logger.info(
-    {
-      action: input.action,
-      entityType: input.entityType,
-      entityId: input.entityId,
-    },
-    "admin audit",
+    { action: input.action, entityType: input.entityType, entityId: input.entityId },
+    'admin audit',
   );
 }

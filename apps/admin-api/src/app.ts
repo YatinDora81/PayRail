@@ -14,8 +14,8 @@ export default function createApp(): Express {
   app.use(helmet());
   app.use(express.json({ limit: "1mb" }));
 
-    app.use(requestContext);
-    app.use(accessLog);
+  app.use(requestContext);
+  app.use(accessLog);
 
   //   app.use(healthRouter);
 

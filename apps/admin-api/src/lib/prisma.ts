@@ -1,1 +1,1 @@
-export { prisma } from "@repo/db";
+export { prisma } from "@payrail/db";

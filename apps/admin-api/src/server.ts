@@ -10,7 +10,7 @@ BigInt.prototype.toJSON = function (): string {
   return this.toString();
 };
 
-export async function createServer(): Promise<Server> {
+export async function startServer(): Promise<Server> {
   await prisma.$connect();
   const app = createApp();
   const server = app.listen(env.PORT, () => {

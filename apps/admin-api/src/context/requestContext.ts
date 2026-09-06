@@ -1,12 +1,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { AdminRole } from '@payrail/db';
 import type { Logger } from "pino";
 
 export interface Actor {
   id: string;
-  email: string;
-  role: string;
+  role: AdminRole;
 }
-
 export interface RequestContext {
   traceId: string;
   ip?: string;
@@ -15,7 +14,7 @@ export interface RequestContext {
   logger: Logger;
 }
 
-const storage = new AsyncLocalStorage<RequestContext>();
+const storage = new AsyncLocalStorage<RequestContext>(); 
 
 export function runWithContext<T>(ctx: RequestContext, fn: () => T): T {
   return storage.run(ctx, fn);
@@ -27,12 +26,11 @@ export function getContext(): RequestContext | undefined {
 
 export function requireContext(): RequestContext {
   const ctx = storage.getStore();
-  if (!ctx)
-    throw new Error("RequestContext accessed outside of a request scope");
+  if (!ctx) throw new Error('RequestContext accessed outside of a request scope');
   return ctx;
 }
 
-export function setActor(actor: Actor) {
+export function setActor(actor: Actor): void {
   const ctx = storage.getStore();
   if (ctx) ctx.actor = actor;
 }
