@@ -34,15 +34,41 @@ type FetchRefundResult struct {
 	AmountMinor     int64
 }
 
+type CreateRefundRequest struct {
+	GatewayPaymentID string
+	GatewayOrderID   string
+	AmountMinor      int64
+	Currency         string // "" = the payment's own currency (the orphan sweep never guesses units)
+	IdempotencyKey   string
+}
+
+type CreateRefundResult struct {
+	GatewayRefundID string
+	Status          string // PENDING | PROCESSED | FAILED
+}
+
+type OrderLookupResult struct {
+	Found            bool
+	GatewayOrderID   string
+	Status           string // PENDING | CAPTURED | FAILED | EXPIRED
+	GatewayPaymentID string
+	AmountMinor      int64
+	Currency         string
+}
+
 type Provider interface {
 	Name() string //razorpay | stripe | .....
 	CreateOrder(ctx context.Context, req CreateOrderRequest) (CreateOrderResult, error)
 	VerifyWebhook(ctx context.Context, payload []byte, headers http.Header) error
 	FetchPayment(ctx context.Context, gatewayOrderID string) (FetchPaymentResult, error)
 	FetchRefund(ctx context.Context, gatewayRefundID, idempotencyKey string) (FetchRefundResult, error)
+	CreateRefund(ctx context.Context, req CreateRefundRequest) (CreateRefundResult, error)
+	FindOrderByReference(ctx context.Context, merchantReference string) (OrderLookupResult, error)
 }
 
 var ErrInvalidSignature = errors.New("invalid webhook signature")
+var ErrRefundRejected = errors.New("refund rejected by provider")
+var ErrLookupUnsupported = errors.New("order lookup by reference not supported by provider")
 
 type Registry struct {
 	providers map[string]Provider

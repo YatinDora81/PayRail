@@ -336,3 +336,69 @@ func decimalStringToMinorPP(v string) int64 {
 	}
 	return n
 }
+
+func (p *PayPal) CreateRefund(ctx context.Context, req CreateRefundRequest) (CreateRefundResult, error) {
+	token, err := p.accessToken(ctx)
+	if err != nil {
+		return CreateRefundResult{}, err
+	}
+
+	var body []byte
+
+	if req.Currency != "" {
+		body, _ = json.Marshal(map[string]any{
+			"amount": map[string]any{"currency_code": req.Currency, "value": minorToDecimal(req.AmountMinor, req.Currency)},
+		})
+	} else {
+		body = []byte(`{}`)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/v2/payments/captures/"+req.GatewayPaymentID+"/refund", bytes.NewReader(body))
+	if err != nil {
+		return CreateRefundResult{}, err
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+token)
+	httpReq.Header.Set("PayPal-Request-Id", req.IdempotencyKey)
+	httpReq.Header.Set("Prefer", "return=representation")
+
+	resp, err := p.http.Do(httpReq)
+	if err != nil {
+		return CreateRefundResult{}, fmt.Errorf("paypal create refund: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode/100 == 4 {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return CreateRefundResult{}, fmt.Errorf("paypal create refund: status %d: %s: %w", resp.StatusCode, snippet, ErrRefundRejected)
+	}
+
+	if resp.StatusCode/100 != 2 {
+		return CreateRefundResult{}, fmt.Errorf("paypal create refund: status %d", resp.StatusCode)
+	}
+
+	var out struct {
+		ID     string `json:"id"`
+		Status string `json:"status"` // COMPLETED | PENDING | CANCELLED | FAILED
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return CreateRefundResult{}, fmt.Errorf("paypal decode: %w", err)
+	}
+
+	res := CreateRefundResult{GatewayRefundID: out.ID, Status: "PENDING"}
+
+	switch out.Status {
+	case "COMPLETED":
+		res.Status = "PROCESSED"
+	case "CANCELLED", "FAILED":
+		res.Status = "FAILED"
+	}
+
+	return res, nil
+}
+
+func (p *PayPal) FindOrderByReference(_ context.Context, _ string) (OrderLookupResult, error) {
+	return OrderLookupResult{}, ErrLookupUnsupported
+}

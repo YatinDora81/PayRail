@@ -38,6 +38,13 @@ func (s *Stripe) Name() string {
 	return "STRIPE"
 }
 
+const stripeAPIVersion = "2026-07-29.dahlia"
+
+func (s *Stripe) auth(r *http.Request) {
+	r.SetBasicAuth(s.secretKey, "")
+	r.Header.Set("Stripe-Version", stripeAPIVersion)
+}
+
 func (s *Stripe) CreateOrder(ctx context.Context, req CreateOrderRequest) (CreateOrderResult, error) {
 
 	form := url.Values{}
@@ -52,7 +59,7 @@ func (s *Stripe) CreateOrder(ctx context.Context, req CreateOrderRequest) (Creat
 	}
 
 	httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	httpReq.SetBasicAuth(s.secretKey, "")
+	s.auth(httpReq)
 	httpReq.Header.Set("Idempotency-Key", req.OrderID)
 
 	resp, err := s.http.Do(httpReq)
@@ -133,7 +140,7 @@ func (s *Stripe) FetchPayment(ctx context.Context, gatewayOrderID string) (Fetch
 	if err != nil {
 		return FetchPaymentResult{}, err
 	}
-	httpReq.SetBasicAuth(s.secretKey, "")
+	s.auth(httpReq)
 	resp, err := s.http.Do(httpReq)
 	if err != nil {
 		return FetchPaymentResult{}, fmt.Errorf("stripe fetch intent: %w", err)
@@ -176,7 +183,7 @@ func (s *Stripe) FetchRefund(ctx context.Context, gatewayRefundID, _ string) (Fe
 	if err != nil {
 		return FetchRefundResult{}, err
 	}
-	httpReq.SetBasicAuth(s.secretKey, "")
+	s.auth(httpReq)
 	resp, err := s.http.Do(httpReq)
 	if err != nil {
 		return FetchRefundResult{}, fmt.Errorf("stripe fetch refund: %w", err)
@@ -203,5 +210,109 @@ func (s *Stripe) FetchRefund(ctx context.Context, gatewayRefundID, _ string) (Fe
 		res.Status = "FAILED"
 	}
 
+	return res, nil
+}
+
+func (s *Stripe) CreateRefund(ctx context.Context, req CreateRefundRequest) (CreateRefundResult, error) {
+
+	form := url.Values{}
+
+	form.Set("charge", req.GatewayPaymentID)
+	form.Set("amount", strconv.FormatInt(req.AmountMinor, 10))
+	form.Set("metadata[idempotencyKey]", req.IdempotencyKey)
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, s.baseURL+"/v1/refunds", strings.NewReader(form.Encode()))
+	if err != nil {
+		return CreateRefundResult{}, err
+	}
+
+	httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	s.auth(httpReq)
+
+	httpReq.Header.Set("Idempotency-Key", req.IdempotencyKey)
+	resp, err := s.http.Do(httpReq)
+	if err != nil {
+		return CreateRefundResult{}, fmt.Errorf("stripe create refund: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 == 4 {
+		return CreateRefundResult{}, fmt.Errorf("stripe create refund: status %d: %w", resp.StatusCode, ErrRefundRejected)
+	}
+	if resp.StatusCode/100 != 2 {
+		return CreateRefundResult{}, fmt.Errorf("stripe create refund: status %d", resp.StatusCode)
+	}
+	var out struct {
+		ID     string `json:"id"`
+		Status string `json:"status"` // pending | succeeded | failed | canceled
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return CreateRefundResult{}, fmt.Errorf("stripe decode: %w", err)
+	}
+
+	res := CreateRefundResult{GatewayRefundID: out.ID, Status: "PENDING"}
+
+	switch out.Status {
+	case "succeeded":
+		res.Status = "PROCESSED"
+	case "failed", "canceled":
+		res.Status = "FAILED"
+	}
+
+	return res, nil
+}
+
+func (s *Stripe) FindOrderByReference(ctx context.Context, merchantReference string) (OrderLookupResult, error) {
+	q := url.Values{}
+	q.Set("query", "metadata['orderId']:'"+strings.ReplaceAll(merchantReference, "'", "")+"'")
+	q.Set("limit", "1")
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL+"/v1/payment_intents/search?"+q.Encode(), nil)
+	if err != nil {
+		return OrderLookupResult{}, err
+	}
+
+	s.auth(httpReq)
+
+	resp, err := s.http.Do(httpReq)
+	if err != nil {
+		return OrderLookupResult{}, fmt.Errorf("stripe search intent: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode/100 != 2 {
+		return OrderLookupResult{}, fmt.Errorf("stripe search intent: status %d", resp.StatusCode)
+	}
+
+	var out struct {
+		Data []struct {
+			ID             string `json:"id"`
+			Status         string `json:"status"`
+			AmountReceived int64  `json:"amount_received"`
+			Currency       string `json:"currency"`
+			LatestCharge   string `json:"latest_charge"`
+		} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return OrderLookupResult{}, fmt.Errorf("stripe decode: %w", err)
+	}
+
+	if len(out.Data) == 0 {
+		return OrderLookupResult{}, nil
+	}
+
+	pi := out.Data[0]
+
+	res := OrderLookupResult{Found: true, GatewayOrderID: pi.ID, Status: "PENDING", GatewayPaymentID: pi.LatestCharge,
+		AmountMinor: pi.AmountReceived, Currency: strings.ToUpper(pi.Currency)}
+
+	switch pi.Status {
+	case "succeeded":
+		res.Status = "CAPTURED"
+	case "canceled":
+		res.Status = "EXPIRED"
+	}
+	
 	return res, nil
 }
