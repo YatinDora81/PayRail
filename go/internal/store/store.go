@@ -520,19 +520,6 @@ func (s *Store) SettleRefund(ctx context.Context, t RefundTarget, gatewayRefundI
 	return clawed, tx.Commit(ctx)
 }
 
-func (s *Store) MarkRefundFailed(ctx context.Context, refundID string) error {
-	tag, err := s.pool.Exec(ctx, `
-		UPDATE "Refund" SET "status" = 'FAILED', "updatedAt" = now()
-		WHERE "id" = $1 AND "status" IN ('PENDING','PROCESSING')`, refundID)
-	if err != nil {
-		return err
-	}
-
-	if tag.RowsAffected() == 1 {
-		telemetry.Counter("payrail_refunds_failed_total").Add(ctx, 1)
-	}
-	return nil
-}
 
 type DisputeTarget struct {
 	OrderID        string

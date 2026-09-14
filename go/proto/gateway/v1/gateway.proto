@@ -87,6 +87,7 @@ message FetchRefundRequest {
     Gateway gateway = 1;
     string gateway_refund_id = 2;
     string idempotency_key = 3;
+    string gateway_order_id = 4;
 }
 
 message FetchRefundResponse {
@@ -114,6 +115,7 @@ message CreateRefundRequest {
     int64 amount_minor = 3;
     Currency currency = 4;
     string idempotency_key = 5;
+    string gateway_order_id = 6;
 }
 
 message CreateRefundResponse {

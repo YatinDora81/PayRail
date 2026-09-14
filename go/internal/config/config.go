@@ -212,7 +212,6 @@ func LoadSettlement() (SettlementConfig, error) {
 	return c, nil
 }
 
-
 func brokers(key, def string) []string {
 	v := env(key, def)
 	parts := strings.Split(v, ",")
@@ -224,7 +223,6 @@ func brokers(key, def string) []string {
 	}
 	return out
 }
-
 
 type ReconcilerConfig struct {
 	Brokers     []string
@@ -255,8 +253,8 @@ type SweeperConfig struct {
 	RedisURL         string
 	Interval         time.Duration
 	BatchSize        int
-	WebhookRetention time.Duration 
-	OutboxRetention  time.Duration 
+	WebhookRetention time.Duration
+	OutboxRetention  time.Duration
 	Env              string
 }
 
@@ -274,4 +272,51 @@ func LoadSweeper() (SweeperConfig, error) {
 		return c, fmt.Errorf("DATABASE_URL is required")
 	}
 	return c, nil
+}
+
+type GatewayReconcilerConfig struct {
+	DatabaseURL          string
+	GatewayTarget        string        
+	GatewayTLS           bool          
+	Interval             time.Duration 
+	StuckOrderGrace      time.Duration 
+	OrphanOrderGrace     time.Duration 
+	StuckRefundGrace     time.Duration 
+	AutoRefundLimitMinor int64        
+	BatchSize            int           
+	Env                  string
+}
+
+func LoadGatewayReconciler() (GatewayReconcilerConfig, error) {
+	c := GatewayReconcilerConfig{
+		DatabaseURL:          os.Getenv("DATABASE_URL"),
+		GatewayTarget:        env("GATEWAY_TARGET", env("GATEWAY_GRPC_ADDR", "localhost:8081")),
+		GatewayTLS:           envBool("GATEWAY_TLS", false),
+		Interval:             envDur("SWEEP_INTERVAL", 2*time.Minute),
+		StuckOrderGrace:      envDur("STUCK_ORDER_GRACE", 15*time.Minute),
+		OrphanOrderGrace:     envDur("ORPHAN_ORDER_GRACE", 5*time.Minute),
+		StuckRefundGrace:     envDur("STUCK_REFUND_GRACE", 30*time.Minute),
+		AutoRefundLimitMinor: envInt64("ORPHAN_AUTOREFUND_MAX_MINOR", 500_000), // ₹5,000 — the figure compose and the ConfigMap pin
+		BatchSize:            envInt("SWEEP_BATCH", 200),
+		Env:                  env("ENV", "development"),
+	}
+	if c.DatabaseURL == "" {
+		return c, fmt.Errorf("DATABASE_URL is required")
+	}
+	if c.AutoRefundLimitMinor < 0 {
+		return c, fmt.Errorf("ORPHAN_AUTOREFUND_MAX_MINOR must be >= 0")
+	}
+	return c, nil
+}
+
+func envInt64(key string, def int64) int64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return def
+	}
+	return n
 }

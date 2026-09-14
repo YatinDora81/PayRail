@@ -59,3 +59,8 @@ type PromotionBudgetUpserted struct {
 type PromotionActivated struct {
 	PromotionID string `json:"promotionId"`
 }
+
+const (
+	TypeCapturedReconciled        = "payment.captured.reconciled"
+	TypeRefundProcessedReconciled = "refund.processed.reconciled"
+)

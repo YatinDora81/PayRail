@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/lucsky/cuid"
+	"github.com/payrail/go/internal/telemetry"
 )
 
 var ErrStaleRefund = errors.New("stale refund event: refund is not in a settleable state")
@@ -257,4 +258,276 @@ func (s *Store) PurgeWebhookEvidence(ctx context.Context, olderThan time.Duratio
 		return 0, err
 	}
 	return ct.RowsAffected(), nil
+}
+
+type StuckOrder struct {
+	ID             string
+	UserID         string
+	Gateway        string
+	GatewayOrderID string
+	Currency       string
+	AmountMinor    int64
+}
+
+type UnstampedOrder struct {
+	ID      string
+	Gateway string
+}
+
+type StuckRefund struct {
+	ID               string
+	OrderID          string
+	Gateway          string
+	GatewayRefundID  string // "" when the CREATE timed out before the id landed
+	GatewayPaymentID string
+	GatewayOrderID   string
+	IdempotencyKey   string
+	AmountMinor      int64
+	Currency         string
+}
+
+type OrphanCapture struct {
+	DeadLetterID     string
+	EventID          string
+	OrderID          string
+	Gateway          string
+	GatewayOrderID   string // the provider's order key — Cashfree refunds are created under it
+	GatewayPaymentID string
+	AmountMinor      int64
+	Currency         string
+}
+
+const (
+	CorrectionOrphanOrderRecovered      = "ORPHAN_ORDER_RECOVERED"
+	CorrectionOrderCaptureHealed        = "ORDER_CAPTURE_HEALED"
+	CorrectionOrderFailedFromProvider   = "ORDER_FAILED_FROM_PROVIDER"
+	CorrectionRefundHealed              = "REFUND_HEALED"
+	CorrectionRefundFailedFromProvider  = "REFUND_FAILED_FROM_PROVIDER"
+	CorrectionOrphanCaptureAutoRefunded = "ORPHAN_CAPTURE_AUTO_REFUNDED"
+	CorrectionOrphanCaptureNeedsReview  = "ORPHAN_CAPTURE_NEEDS_REVIEW"
+)
+
+type Correction struct {
+	Kind         string
+	DeadLetterID string // "" → NULL
+	Note         string
+	Corrected    bool
+}
+
+func (s *Store) OrdersUnstamped(ctx context.Context, olderThan time.Duration, limit int) ([]UnstampedOrder, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT "id", "gateway" FROM "Order"
+		WHERE "status" = 'CREATED' AND "gateway" IS NOT NULL AND "gatewayOrderId" IS NULL
+		  AND "createdAt" < now() - $1::interval
+		ORDER BY "createdAt" ASC
+		LIMIT $2`, olderThan, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []UnstampedOrder
+	for rows.Next() {
+		var o UnstampedOrder
+		if err := rows.Scan(&o.ID, &o.Gateway); err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) LogReconciliation(ctx context.Context, c Correction) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO "ReconciliationLog" ("id","kind","deadLetterId","note","corrected")
+		VALUES ($1,$2,NULLIF($3,''),$4,$5)`, cuid.New(), c.Kind, c.DeadLetterID, c.Note, c.Corrected)
+	return err
+}
+
+func (s *Store) EnqueueOutbox(ctx context.Context, topic, partitionKey string, payload []byte) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO "OutboxEvent" ("id","topic","partitionKey","payload")
+		VALUES ($1,$2,$3,$4)`, cuid.New(), topic, partitionKey, payload)
+	return err
+}
+
+func (s *Store) OrdersAwaitingSettlement(ctx context.Context, olderThan time.Duration, limit int) ([]StuckOrder, error) {
+	const q = `
+		SELECT "id","userId","gateway","gatewayOrderId","currency","finalAmountMinor"
+		FROM "Order"
+		WHERE "status" = 'PENDING_PAYMENT'
+		  AND "gatewayOrderId" IS NOT NULL
+		  AND "updatedAt" < now() - $1::interval
+		ORDER BY "updatedAt" ASC
+		LIMIT $2`
+	rows, err := s.pool.Query(ctx, q, olderThan, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []StuckOrder
+	for rows.Next() {
+		var o StuckOrder
+		if err := rows.Scan(&o.ID, &o.UserID, &o.Gateway, &o.GatewayOrderID, &o.Currency, &o.AmountMinor); err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) FailStuckOrder(ctx context.Context, orderID string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	ct, err := tx.Exec(ctx, `
+		UPDATE "Order" SET "status" = 'FAILED', "updatedAt" = now()
+		WHERE "id" = $1 AND "status" IN ('CREATED','PENDING_PAYMENT','AUTHORIZED')`, orderID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return tx.Commit(ctx)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO "PromotionSpend" ("id","promotionId","currency","amountMinor","status","orderId")
+		SELECT $2 || '_' || "id", "promotionId", "currency", -"amountMinor", 'RELEASED', "orderId"
+		FROM "PromotionSpend"
+		WHERE "orderId" = $1 AND "status" = 'RESERVED'`, orderID, cuid.New()); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE "PromotionUsage" SET "status" = 'RELEASED'
+		WHERE "orderId" = $1 AND "status" = 'RESERVED'`, orderID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) RefundsAwaitingResolution(ctx context.Context, olderThan time.Duration, limit int) ([]StuckRefund, error) {
+	const q = `
+		SELECT r."id", r."orderId", r."gateway", COALESCE(r."gatewayRefundId", ''),
+		       p."gatewayPaymentId", COALESCE(o."gatewayOrderId", ''),
+		       r."idempotencyKey", r."amountMinor", r."currency"
+		FROM "Refund" r
+		JOIN "Payment" p ON p."id" = r."paymentId"
+		JOIN "Order"   o ON o."id" = r."orderId"
+		WHERE r."status" IN ('PENDING','PROCESSING') AND r."createdAt" < now() - $1::interval  -- PROCESSING is admin-api's "accepted, not settled" 
+		ORDER BY r."createdAt" ASC
+		LIMIT $2`
+	rows, err := s.pool.Query(ctx, q, olderThan, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []StuckRefund
+	for rows.Next() {
+		var r StuckRefund
+		if err := rows.Scan(&r.ID, &r.OrderID, &r.Gateway, &r.GatewayRefundID,
+			&r.GatewayPaymentID, &r.GatewayOrderID, &r.IdempotencyKey, &r.AmountMinor, &r.Currency); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) MarkRefundFailed(ctx context.Context, refundID string) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE "Refund" SET "status" = 'FAILED', "updatedAt" = now()
+		WHERE "id" = $1 AND "status" IN ('PENDING','PROCESSING')`, refundID)
+	if err != nil {
+		return err
+	}
+
+	if tag.RowsAffected() == 1 {
+		telemetry.Counter("payrail_refunds_failed_total").Add(ctx, 1)
+	}
+	return nil
+}
+
+func (s *Store) ParkedCapturesOnTerminalOrders(ctx context.Context, limit int) ([]OrphanCapture, error) {
+	const q = `
+		SELECT d."id",
+		       d."payload"->>'eventId',
+		       o."id",
+		       d."payload"->>'gateway',
+		       o."gatewayOrderId",
+		       d."payload"->>'gatewayPaymentId',
+		       (d."payload"->>'amountMinor')::bigint,
+		       d."payload"->>'currency'
+		FROM "DeadLetterEvent" d
+		JOIN "Order" o ON o."gatewayOrderId" = d."payload"->>'gatewayOrderId'
+		WHERE d."reason" LIKE 'stale capture%'  -- settlement parks as "stale capture: …" 
+		  AND d."payload"->>'kind' = 'PAYMENT'
+		  AND d."needsReview" = false
+		  AND o."status" IN ('EXPIRED','FAILED','CANCELLED')
+		  AND NOT EXISTS (SELECT 1 FROM "ReconciliationLog" rl WHERE rl."deadLetterId" = d."id")
+		  AND NOT EXISTS (SELECT 1 FROM "Refund" r
+		                  WHERE r."idempotencyKey" = 'orphan:' || (d."payload"->>'eventId')
+		                    AND r."status" <> 'FAILED')
+		ORDER BY d."createdAt" ASC
+		LIMIT $1`
+	rows, err := s.pool.Query(ctx, q, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []OrphanCapture
+	for rows.Next() {
+		var o OrphanCapture
+		if err := rows.Scan(&o.DeadLetterID, &o.EventID, &o.OrderID, &o.Gateway,
+			&o.GatewayOrderID, &o.GatewayPaymentID, &o.AmountMinor, &o.Currency); err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) MarkNeedsReview(ctx context.Context, deadLetterID string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE "DeadLetterEvent" SET "needsReview" = true WHERE "id" = $1`, deadLetterID)
+	return err
+}
+
+func (s *Store) CreateOrphanRefund(ctx context.Context, orderID, gatewayPaymentID, gateway string, amountMinor int64, currency, idempotencyKey string) (string, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx)
+
+	var paymentID string
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO "Payment" ("id","orderId","gateway","gatewayPaymentId","amountMinor","currency","status","capturedAt","updatedAt")
+		VALUES ($1,$2,$3,$4,$5,$6,'CAPTURED', now(), now())
+		ON CONFLICT ("gatewayPaymentId") DO UPDATE SET "updatedAt" = now()
+		RETURNING "id"`,
+		cuid.New(), orderID, gateway, gatewayPaymentID, amountMinor, currency).Scan(&paymentID); err != nil {
+		return "", err
+	}
+
+	refundID := cuid.New()
+	ct, err := tx.Exec(ctx, `
+		INSERT INTO "Refund" ("id","orderId","paymentId","gateway","amountMinor","currency","status","reason","idempotencyKey","updatedAt")
+		VALUES ($1,$2,$3,$4,$5,$6,'PENDING','orphan capture auto-refund (§1)',$7, now())
+		ON CONFLICT ("idempotencyKey") DO NOTHING`,
+		refundID, orderID, paymentID, gateway, amountMinor, currency, idempotencyKey)
+		
+	if err != nil {
+		return "", err
+	}
+	if ct.RowsAffected() == 0 { 
+		if err := tx.QueryRow(ctx, `
+			SELECT "id" FROM "Refund" WHERE "idempotencyKey" = $1`, idempotencyKey).Scan(&refundID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return "", ErrNotFound
+			}
+			return "", err
+		}
+	}
+	return refundID, tx.Commit(ctx)
 }

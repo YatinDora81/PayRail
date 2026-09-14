@@ -593,6 +593,7 @@ type FetchRefundRequest struct {
 	Gateway         Gateway                `protobuf:"varint,1,opt,name=gateway,proto3,enum=payrail.gateway.v1.Gateway" json:"gateway,omitempty"`
 	GatewayRefundId string                 `protobuf:"bytes,2,opt,name=gateway_refund_id,json=gatewayRefundId,proto3" json:"gateway_refund_id,omitempty"`
 	IdempotencyKey  string                 `protobuf:"bytes,3,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	GatewayOrderId  string                 `protobuf:"bytes,4,opt,name=gateway_order_id,json=gatewayOrderId,proto3" json:"gateway_order_id,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -644,6 +645,13 @@ func (x *FetchRefundRequest) GetGatewayRefundId() string {
 func (x *FetchRefundRequest) GetIdempotencyKey() string {
 	if x != nil {
 		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *FetchRefundRequest) GetGatewayOrderId() string {
+	if x != nil {
+		return x.GatewayOrderId
 	}
 	return ""
 }
@@ -843,6 +851,7 @@ type CreateRefundRequest struct {
 	AmountMinor      int64                  `protobuf:"varint,3,opt,name=amount_minor,json=amountMinor,proto3" json:"amount_minor,omitempty"`
 	Currency         Currency               `protobuf:"varint,4,opt,name=currency,proto3,enum=payrail.gateway.v1.Currency" json:"currency,omitempty"`
 	IdempotencyKey   string                 `protobuf:"bytes,5,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	GatewayOrderId   string                 `protobuf:"bytes,6,opt,name=gateway_order_id,json=gatewayOrderId,proto3" json:"gateway_order_id,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -908,6 +917,13 @@ func (x *CreateRefundRequest) GetCurrency() Currency {
 func (x *CreateRefundRequest) GetIdempotencyKey() string {
 	if x != nil {
 		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *CreateRefundRequest) GetGatewayOrderId() string {
+	if x != nil {
+		return x.GatewayOrderId
 	}
 	return ""
 }
@@ -1124,11 +1140,12 @@ const file_gateway_v1_gateway_proto_rawDesc = "" +
 	"\x06status\x18\x01 \x01(\x0e2!.payrail.gateway.v1.PaymentStatusR\x06status\x12,\n" +
 	"\x12gateway_payment_id\x18\x02 \x01(\tR\x10gatewayPaymentId\x12!\n" +
 	"\famount_minor\x18\x03 \x01(\x03R\vamountMinor\x128\n" +
-	"\bcurrency\x18\x04 \x01(\x0e2\x1c.payrail.gateway.v1.CurrencyR\bcurrency\"\xa0\x01\n" +
+	"\bcurrency\x18\x04 \x01(\x0e2\x1c.payrail.gateway.v1.CurrencyR\bcurrency\"\xca\x01\n" +
 	"\x12FetchRefundRequest\x125\n" +
 	"\agateway\x18\x01 \x01(\x0e2\x1b.payrail.gateway.v1.GatewayR\agateway\x12*\n" +
 	"\x11gateway_refund_id\x18\x02 \x01(\tR\x0fgatewayRefundId\x12'\n" +
-	"\x0fidempotency_key\x18\x03 \x01(\tR\x0eidempotencyKey\"\x9e\x01\n" +
+	"\x0fidempotency_key\x18\x03 \x01(\tR\x0eidempotencyKey\x12(\n" +
+	"\x10gateway_order_id\x18\x04 \x01(\tR\x0egatewayOrderId\"\x9e\x01\n" +
 	"\x13FetchRefundResponse\x128\n" +
 	"\x06status\x18\x01 \x01(\x0e2 .payrail.gateway.v1.RefundStatusR\x06status\x12*\n" +
 	"\x11gateway_refund_id\x18\x02 \x01(\tR\x0fgatewayRefundId\x12!\n" +
@@ -1141,13 +1158,14 @@ const file_gateway_v1_gateway_proto_rawDesc = "" +
 	"\x0fCaptureResponse\x129\n" +
 	"\x06status\x18\x01 \x01(\x0e2!.payrail.gateway.v1.PaymentStatusR\x06status\x12,\n" +
 	"\x12gateway_payment_id\x18\x02 \x01(\tR\x10gatewayPaymentId\x12!\n" +
-	"\famount_minor\x18\x03 \x01(\x03R\vamountMinor\"\x80\x02\n" +
+	"\famount_minor\x18\x03 \x01(\x03R\vamountMinor\"\xaa\x02\n" +
 	"\x13CreateRefundRequest\x125\n" +
 	"\agateway\x18\x01 \x01(\x0e2\x1b.payrail.gateway.v1.GatewayR\agateway\x12,\n" +
 	"\x12gateway_payment_id\x18\x02 \x01(\tR\x10gatewayPaymentId\x12!\n" +
 	"\famount_minor\x18\x03 \x01(\x03R\vamountMinor\x128\n" +
 	"\bcurrency\x18\x04 \x01(\x0e2\x1c.payrail.gateway.v1.CurrencyR\bcurrency\x12'\n" +
-	"\x0fidempotency_key\x18\x05 \x01(\tR\x0eidempotencyKey\"|\n" +
+	"\x0fidempotency_key\x18\x05 \x01(\tR\x0eidempotencyKey\x12(\n" +
+	"\x10gateway_order_id\x18\x06 \x01(\tR\x0egatewayOrderId\"|\n" +
 	"\x14CreateRefundResponse\x128\n" +
 	"\x06status\x18\x01 \x01(\x0e2 .payrail.gateway.v1.RefundStatusR\x06status\x12*\n" +
 	"\x11gateway_refund_id\x18\x02 \x01(\tR\x0fgatewayRefundId\"\x83\x01\n" +
